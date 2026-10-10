@@ -11,6 +11,9 @@ const COMMON_HEADERS = {
   "X-Title": "MicroBounty"
 };
 
+// Judge model: the same one the qa-agent Edge Function uses
+export const JUDGE_MODEL = "openai/gpt-4o-mini";
+
 /**
  * Generic OpenRouter caller
  */
@@ -109,7 +112,7 @@ export async function callJudgeAI(
   agent: any, 
   clientInput: string, 
   agentOutput: string, 
-  model: string = "google/gemini-2.0-flash-001",
+  model: string = JUDGE_MODEL,
   customPrompt?: string
 ) {
   const defaultPrompt = `You are a strict quality judge for AI agent outputs.

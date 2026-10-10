@@ -53,7 +53,7 @@ export async function simulateDocuMind(input: string): Promise<DocuMindOutput> {
   Text: ${input}
   Return ONLY valid JSON, no markdown.`;
 
-  const response = await callOpenRouter('google/gemini-2.0-flash-001', prompt);
+  const response = await callOpenRouter('openai/gpt-4o-mini', prompt);
   
   // Clean markdown blocks if present
   let cleanResponse = response.trim();

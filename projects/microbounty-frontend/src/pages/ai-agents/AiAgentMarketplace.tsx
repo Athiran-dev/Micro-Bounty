@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Database, PenTool, Code, TestTube, Sparkles, Loader2, ArrowRight } from 'lucide-react';
+import { Search, Database, PenTool, Code, TestTube, Sparkles, Loader2, ArrowRight, Star } from 'lucide-react';
 import { getSupabase } from '../../utils/supabaseClient';
 import DashboardLayout from '../../components/DashboardLayout';
 import { Link, useNavigate } from 'react-router-dom';
@@ -9,6 +9,7 @@ import agent2Img from '../../../newUpdatedUi/agent2.png';
 
 export default function AiAgentMarketplace() {
   const [agents, setAgents] = useState<any[]>([]);
+  const [reputations, setReputations] = useState<Record<number, any>>({});
   const [loading, setLoading] = useState(true);
   const [matcherInput, setMatcherInput] = useState('');
   const [matching, setMatching] = useState(false);
@@ -32,6 +33,11 @@ export default function AiAgentMarketplace() {
 
       if (error) throw error;
       setAgents(data || []);
+
+      // Reputation from judged runs (agent_reputation view). Agents without a row are new.
+      const { data: repRows, error: repError } = await supabase.from('agent_reputation').select('*');
+      if (repError) console.error("Error fetching agent reputation:", repError);
+      setReputations(Object.fromEntries((repRows || []).map((r: any) => [r.agent_id, r])));
     } catch (err) {
       console.error("Error fetching agents:", err);
     } finally {
@@ -258,6 +264,18 @@ Respond ONLY with the numerical ID of the agent. If no agent fits perfectly, pic
                   <span className="px-2.5 py-1 bg-[#F3E8FF] text-[#6D28D9] rounded-full text-[10px] font-bold tracking-wide">
                     {agent.category}
                   </span>
+                  {reputations[agent.agent_id]?.reputation != null ? (
+                    <span
+                      className="px-2.5 py-1 bg-[#FEF3C7] text-[#B45309] rounded-full text-[10px] font-bold tracking-wide flex items-center gap-1"
+                      title={`${reputations[agent.agent_id].verified_runs} verified, ${reputations[agent.agent_id].rejected_runs} rejected`}
+                    >
+                      <Star className="w-3 h-3 fill-current" /> {Number(reputations[agent.agent_id].reputation).toFixed(1)} / 5
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 bg-[#D1FAE5] text-[#059669] rounded-full text-[10px] font-bold tracking-wide">
+                      New
+                    </span>
+                  )}
                   <span className="px-2.5 py-1 bg-gray-100 text-gray-600 rounded-full text-[10px] font-bold tracking-wide">
                     {agent.total_tasks} Tasks
                   </span>

@@ -5,7 +5,7 @@ import { useSnackbar } from 'notistack';
 import DashboardLayout from '../../components/DashboardLayout';
 import { Brain, CheckCircle2, ShieldCheck, Zap, FileText, Image as ImageIcon, Video, Code, Info, Activity, LayoutGrid, CheckCircle } from 'lucide-react';
 import { getSupabase } from '../../utils/supabaseClient';
-import { callJudgeAI } from '../../lib/openrouter';
+import { callJudgeAI, JUDGE_MODEL } from '../../lib/openrouter';
 import { useAiContractMocks } from '../../hooks/useAiContractMocks';
 import { simulateDocuMind, simulateAuditor, DocuMindOutput, AuditorOutput } from '../../lib/demo-agent-simulator';
 import { X402Badge, X402FlowPanel } from '../../components/X402Badge';
@@ -136,12 +136,11 @@ export default function AiAgentProfile() {
 
       setTaskStatus('judging');
       let judgePrompt: string | undefined;
-      let judgeModel = "google/gemini-2.0-flash-001";
+      const judgeModel = JUDGE_MODEL;
 
       if (agent.agent_id === 9001) {
         judgePrompt = `You are evaluating a research paper analysis agent output. Check if the response contains: summary, key_findings array (min 2 items), methodology, and eli5 explanation. Agent output: {output} Return JSON: { "verdict": boolean, "confidence": number, "reasoning": string }`;
       } else if (agent.agent_id === 9002) {
-        judgeModel = "openai/gpt-4o-mini";
         judgePrompt = `You are evaluating a smart contract security audit output. The audit must contain: security_grade (A/B/C/F), overall_risk level, vulnerabilities array, and summary. Agent output: {output} Return JSON: { "verdict": boolean, "confidence": number, "reasoning": string }`;
       }
 
