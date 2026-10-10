@@ -1,14 +1,16 @@
 import React, { useRef, useState } from 'react';
 import { useWallet } from '@txnlab/use-wallet-react';
 import { useSnackbar } from 'notistack';
-import { AlertTriangle, Bug, CheckCircle2, Clock, ExternalLink, Globe, Loader2, Monitor, ShieldCheck, XCircle } from 'lucide-react';
+import { AlertTriangle, Bug, CheckCircle2, Clock, ExternalLink, Globe, ListChecks, Loader2, Monitor, ShieldCheck, XCircle } from 'lucide-react';
 import { useAiContractMocks } from '../hooks/useAiContractMocks';
 import {
   loraTransactionUrl,
   runQaAgent,
+  type QaCheck,
+  type QaCheckStatus,
   type QaEvent,
-  type QaIssue,
   type QaReport,
+  type QaReportIssue,
   type QaSeverity,
 } from '../lib/qa-agent-client';
 
@@ -56,7 +58,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
   const [errorEvent, setErrorEvent] = useState<QaEvent | null>(null);
 
   const nextId = useRef(0);
-  const seen = useRef({ started: false, live: false });
+  const seen = useRef({ started: false, live: false, discovery: false });
 
   const addEntry = (label: string, tone: TimelineEntry['tone'] = 'step') => {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -83,6 +85,18 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
         }
         setPhase('running');
         break;
+      case 'DISCOVERY':
+        if (event.discovery && !seen.current.discovery) {
+          seen.current.discovery = true;
+          const { pages, issues, error: discoveryError } = event.discovery;
+          addEntry(
+            discoveryError && pages.length <= 1
+              ? `Could not read the page for links (${discoveryError})`
+              : `Found ${pages.length} page${pages.length === 1 ? '' : 's'} on the site, ${issues.length} broken link${issues.length === 1 ? '' : 's'} or image${issues.length === 1 ? '' : 's'}`,
+            'milestone'
+          );
+        }
+        break;
       case 'STREAMING_URL':
         if (event.streaming_url && isWebUrl(event.streaming_url) && !seen.current.live) {
           seen.current.live = true;
@@ -99,7 +113,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
         addEntry('Report received', 'milestone');
         break;
       case 'VERIFYING':
-        addEntry('Judge is checking the report against the live pages', 'milestone');
+        addEntry('Judge is checking each failed check against the live pages', 'milestone');
         break;
       case 'SETTLING':
         addEntry('Settling the escrow on-chain', 'milestone');
@@ -135,7 +149,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
     setError(null);
     setErrorEvent(null);
     setTaskId(null);
-    seen.current = { started: false, live: false };
+    seen.current = { started: false, live: false, discovery: false };
 
     let lockFailed = false;
     try {
@@ -199,7 +213,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
             />
           </div>
           <p className="text-xs text-[#64748B] mt-2">
-            The agent opens the site in a real browser, tries the main form and links on up to 2 pages, and takes about 2 minutes. The site must be public.
+            The agent opens the site in a real browser and runs the same six checks on every site: homepage, navigation, the main form (empty and invalid input), the main call-to-action and visible errors. It takes about 3 minutes. The site must be public.
           </p>
         </div>
 
@@ -218,7 +232,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
             <span className="text-[#C4A1FF]">{agent.price_per_task_algo} ALGO</span>
           </div>
           <p className="text-[11px] text-[#64748B] mt-3">
-            Released to the agent only if the Judge verifies the report. Refunded to you if it is rejected or incomplete.
+            Released to the agent when the report holds up. Refunded to you if the Judge rejects a finding or fewer than 3 checks could run.
           </p>
         </div>
 
@@ -364,16 +378,26 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
 
 // --- Report card ---
 
+const CHECK_STATUS_STYLE: Record<QaCheckStatus, string> = {
+  pass: 'text-[#00FF9D] border-[#00FF9D]/40 bg-[#00FF9D]/10',
+  fail: 'text-red-400 border-red-500/40 bg-red-500/10',
+  blocked: 'text-[#94A3B8] border-[#334155] bg-[#1A1D24]',
+};
+
+const JUDGE_VERDICT_LABEL: Record<string, string> = {
+  confirmed: 'Confirmed',
+  needs_review: 'Needs review',
+  rejected: 'Rejected by Judge',
+};
+
 function QaReportCard({ report, finalEvent }: { report: QaReport; finalEvent: QaEvent | null }) {
   const verification = finalEvent?.verification ?? null;
   const settlement = verification?.settlement;
-  const tested = report.tested ?? [];
-  const untested = report.untested ?? [];
   const incomplete = finalEvent?.incomplete === true;
-
-  const grouped = SEVERITY_ORDER
-    .map((severity) => ({ severity, issues: report.issues.filter((issue) => issue.severity === severity) }))
-    .filter((group) => group.issues.length > 0);
+  const checks = report.checks ?? [];
+  // Present once the Judge has ruled; until then the numbers are not known
+  const assessment = finalEvent ? report.assessment ?? null : null;
+  const waiting = !finalEvent;
 
   return (
     <div className="animate-in zoom-in-95 duration-300 space-y-6">
@@ -410,39 +434,161 @@ function QaReportCard({ report, finalEvent }: { report: QaReport; finalEvent: Qa
       )}
 
       <div className="bg-[#1A1D24] border border-[#262A36] rounded-xl p-6 space-y-6">
-        <div className="flex flex-col md:flex-row items-center gap-6 bg-[#15171E] p-6 rounded-2xl border border-[#262A36]">
-          {!incomplete && (
-            <div className="w-24 h-24 rounded-2xl border flex flex-col items-center justify-center shrink-0 border-[#C4A1FF]/50 bg-[#C4A1FF]/10 text-[#C4A1FF]">
-              {finalEvent ? (
-                <span className="text-4xl font-black">{report.score}</span>
-              ) : (
-                <Loader2 className="w-8 h-8 animate-spin" />
-              )}
-              <span className="text-[10px] font-bold uppercase tracking-widest mt-1">Score</span>
-            </div>
-          )}
-          <p className="flex-1 text-[#94A3B8] text-sm leading-relaxed text-center md:text-left">{report.summary}</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <SummaryTile
+            label="Score"
+            waiting={waiting}
+            value={assessment && assessment.score !== null && !incomplete ? String(assessment.score) : '–'}
+            hint={incomplete ? 'No score: incomplete run' : assessment ? `${assessment.checks_ran} of ${assessment.checks_total} checks ran` : ''}
+            accent="text-[#C4A1FF]"
+          />
+          <SummaryTile
+            label="Pages tested"
+            waiting={waiting}
+            value={assessment ? `${assessment.pages_tested} of ${assessment.pages_total}` : '–'}
+            hint="Loaded by the agent"
+            accent="text-white"
+          />
+          <SummaryTile
+            label="Confirmed"
+            waiting={waiting}
+            value={assessment ? String(assessment.confirmed.length) : '–'}
+            hint="Issues backed by evidence"
+            accent="text-red-400"
+          />
+          <SummaryTile
+            label="Needs review"
+            waiting={waiting}
+            value={assessment ? String(assessment.needs_review.length) : '–'}
+            hint="Not counted in the score"
+            accent="text-yellow-300"
+          />
         </div>
 
-        <div className="space-y-4">
+        <p className="text-[#94A3B8] text-sm leading-relaxed">{report.summary}</p>
+
+        <div className="space-y-3">
           <h5 className="text-white font-bold text-xs uppercase tracking-widest flex items-center gap-2">
-            <Bug className="w-4 h-4 text-red-400" /> Issues ({report.issues.length})
+            <ListChecks className="w-4 h-4 text-[#C4A1FF]" /> Checklist ({checks.filter((check) => check.status !== 'blocked').length} of {checks.length} ran)
           </h5>
-          {grouped.length === 0 && <p className="text-sm text-[#94A3B8]">No issues were reported.</p>}
-          {grouped.map((group) => (
-            <div key={group.severity} className="space-y-3">
-              {group.issues.map((issue, i) => (
-                <IssueCard key={`${group.severity}-${i}`} issue={issue} />
-              ))}
-            </div>
+          {checks.length === 0 && <p className="text-sm text-[#94A3B8]">This report has no checklist.</p>}
+          {checks.map((check) => (
+            <CheckRow key={check.id} check={check} />
           ))}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <CoverageList title="Tested" items={tested} empty="The agent did not list what it tested." accent="text-[#00FF9D]" />
-          <CoverageList title="Not covered" items={untested} empty="Nothing was left untested." accent="text-yellow-300" />
+        {assessment && (
+          <>
+            <IssueSection
+              title="Confirmed issues"
+              icon={<Bug className="w-4 h-4 text-red-400" />}
+              issues={assessment.confirmed}
+              empty="No issue was confirmed."
+            />
+            <IssueSection
+              title="Needs review"
+              icon={<AlertTriangle className="w-4 h-4 text-yellow-300" />}
+              issues={assessment.needs_review}
+              empty="Nothing is waiting for review."
+              note="The agent reported these, but the evidence could not confirm them. They do not affect the score."
+            />
+            {assessment.rejected.length > 0 && (
+              <IssueSection
+                title="Rejected by the Judge"
+                icon={<XCircle className="w-4 h-4 text-[#94A3B8]" />}
+                issues={assessment.rejected}
+                empty=""
+                note="The evidence contradicted these, or they are not defects of the site. A rejected finding refunds the run."
+              />
+            )}
+
+            <div className="bg-[#12141C] border border-[#262A36] rounded-xl p-4">
+              <h5 className="font-bold text-xs uppercase tracking-widest mb-3 text-yellow-300">
+                Not tested ({assessment.pages_not_tested.length})
+              </h5>
+              {assessment.pages_not_tested.length === 0 ? (
+                <p className="text-xs text-[#64748B]">The agent loaded every page that was found on the site.</p>
+              ) : (
+                <>
+                  <p className="text-xs text-[#64748B] mb-2">Pages found on the site that the agent did not load.</p>
+                  <ul className="space-y-1.5 text-xs font-mono text-[#94A3B8]">
+                    {assessment.pages_not_tested.map((page) => (
+                      <li key={page} className="break-all">{page}</li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+
+            {isWebUrl(assessment.run_url) && (
+              <p className="text-xs text-[#64748B]">
+                TinyFish run:{' '}
+                <a
+                  href={assessment.run_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-mono text-[#C4A1FF] hover:text-white break-all inline-flex items-center gap-1"
+                >
+                  {assessment.run_url} <ExternalLink className="w-3 h-3 shrink-0" />
+                </a>{' '}
+                (opens for the TinyFish account that ran it)
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SummaryTile({ label, value, hint, accent, waiting }: { label: string; value: string; hint: string; accent: string; waiting: boolean }) {
+  return (
+    <div className="bg-[#15171E] border border-[#262A36] rounded-xl p-4 text-center">
+      <div className={`text-2xl font-black h-8 flex items-center justify-center ${accent}`}>
+        {waiting ? <Loader2 className="w-5 h-5 animate-spin" /> : value}
+      </div>
+      <div className="text-[10px] font-bold uppercase tracking-widest text-white mt-1">{label}</div>
+      {hint && <div className="text-[10px] text-[#64748B] mt-1">{hint}</div>}
+    </div>
+  );
+}
+
+function CheckRow({ check }: { check: QaCheck }) {
+  return (
+    <div className="border border-[#262A36] rounded-xl bg-[#12141C] p-4">
+      <div className="flex items-start gap-3">
+        <span className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider shrink-0 w-16 text-center ${CHECK_STATUS_STYLE[check.status]}`}>
+          {check.status}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h6 className="text-sm font-bold text-white">{check.name}</h6>
+            {check.judge && (
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#64748B]">
+                {JUDGE_VERDICT_LABEL[check.judge.verdict] ?? check.judge.verdict}
+              </span>
+            )}
+          </div>
+          {check.observed && <p className="text-sm text-[#94A3B8] mt-1 break-words">{check.observed}</p>}
+          {check.note && <p className="text-xs text-yellow-300/80 mt-1">{check.note}</p>}
         </div>
       </div>
+    </div>
+  );
+}
+
+function IssueSection({ title, icon, issues, empty, note }: { title: string; icon: React.ReactNode; issues: QaReportIssue[]; empty: string; note?: string }) {
+  const sorted = SEVERITY_ORDER.flatMap((severity) => issues.filter((issue) => issue.severity === severity));
+  return (
+    <div className="space-y-3">
+      <h5 className="text-white font-bold text-xs uppercase tracking-widest flex items-center gap-2">
+        {icon} {title} ({issues.length})
+      </h5>
+      {note && issues.length > 0 && <p className="text-xs text-[#64748B]">{note}</p>}
+      {issues.length === 0 && <p className="text-sm text-[#94A3B8]">{empty}</p>}
+      {sorted.map((issue, i) => (
+        <IssueCard key={`${issue.id}-${i}`} issue={issue} />
+      ))}
     </div>
   );
 }
@@ -451,6 +597,7 @@ function VerdictBanner({ finalEvent }: { finalEvent: QaEvent }) {
   const verification = finalEvent.verification ?? null;
   const incomplete = finalEvent.incomplete === true;
   const verified = finalEvent.verified;
+  const counts = verification?.issues;
 
   let label = 'Not verified';
   let style = 'bg-[#1A1D24] border-[#334155]';
@@ -462,82 +609,87 @@ function VerdictBanner({ finalEvent }: { finalEvent: QaEvent }) {
     label = 'Incomplete';
     style = 'bg-yellow-500/10 border-yellow-500/30';
     titleStyle = 'text-yellow-300';
-    reasoning = 'The agent did not test enough of the site for this run to count, so no score is given.';
+    reasoning = 'Fewer than 3 of the 6 checks could run, so this run does not count and no score is given.';
   } else if (verified === true) {
     label = 'Verified';
     style = 'bg-[#00FF9D]/10 border-[#00FF9D]/30';
     titleStyle = 'text-[#00FF9D]';
     Icon = CheckCircle2;
-    reasoning = verification?.judge?.reasoning || '';
+    reasoning = counts && counts.confirmed + counts.needs_review > 0
+      ? 'The Judge did not reject any failure the agent reported.'
+      : 'The agent reported no failed check, so there was nothing for the Judge to dispute.';
   } else if (verified === false) {
     label = 'Rejected';
     style = 'bg-red-500/10 border-red-500/30';
     titleStyle = 'text-red-400';
     Icon = ShieldCheck;
-    reasoning = verification?.judge?.reasoning || '';
+    reasoning = verification?.judge?.reasoning || 'The Judge rejected a failure the agent reported.';
   }
 
   return (
     <div className={`p-4 rounded-xl border flex items-start gap-4 ${style}`}>
       <Icon className={`w-8 h-8 shrink-0 ${titleStyle}`} />
       <div>
-        <h3 className={`text-lg font-bold mb-1 ${titleStyle}`}>
-          {label}
-          {verification?.judge && !incomplete && (
-            <span className="ml-2 text-xs font-medium text-[#64748B]">Judge confidence {verification.judge.confidence}%</span>
-          )}
-        </h3>
+        <h3 className={`text-lg font-bold mb-1 ${titleStyle}`}>{label}</h3>
         {reasoning && <p className="text-sm text-[#94A3B8]">{reasoning}</p>}
       </div>
     </div>
   );
 }
 
-function IssueCard({ issue }: { issue: QaIssue }) {
+function IssueCard({ issue }: { issue: QaReportIssue }) {
   return (
-    <div className="border border-[#262A36] rounded-xl bg-[#12141C] p-4">
-      <div className="flex items-start gap-3 mb-3">
+    <div className="border border-[#262A36] rounded-xl bg-[#12141C] p-4 space-y-3">
+      <div className="flex items-start gap-3">
         <span className={`px-2 py-0.5 rounded border text-[10px] font-bold uppercase tracking-wider shrink-0 ${SEVERITY_STYLE[issue.severity]}`}>
           {issue.severity}
         </span>
-        <h6 className="text-sm font-bold text-white">{issue.title}</h6>
+        <h6 className="text-sm font-bold text-white break-words min-w-0">{issue.title}</h6>
       </div>
-      <ol className="list-decimal list-inside space-y-1 text-sm text-[#94A3B8] mb-3">
-        {issue.steps.map((step, i) => (
-          <li key={i}>{step}</li>
-        ))}
-      </ol>
-      {isWebUrl(issue.page) ? (
-        <a
-          href={issue.page}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-xs font-mono text-[#C4A1FF] hover:text-white break-all inline-flex items-center gap-1"
-        >
-          {issue.page} <ExternalLink className="w-3 h-3 shrink-0" />
-        </a>
-      ) : (
-        <span className="text-xs font-mono text-[#64748B] break-all">{issue.page}</span>
-      )}
-    </div>
-  );
-}
-
-function CoverageList({ title, items, empty, accent }: { title: string; items: string[]; empty: string; accent: string }) {
-  return (
-    <div className="bg-[#12141C] border border-[#262A36] rounded-xl p-4">
-      <h5 className={`font-bold text-xs uppercase tracking-widest mb-3 ${accent}`}>
-        {title} ({items.length})
-      </h5>
-      {items.length === 0 ? (
-        <p className="text-xs text-[#64748B]">{empty}</p>
-      ) : (
-        <ul className="space-y-1.5 text-sm text-[#94A3B8] list-disc list-inside">
-          {items.map((item, i) => (
-            <li key={i}>{item}</li>
+      {issue.observed && <p className="text-sm text-[#94A3B8] break-words">{issue.observed}</p>}
+      {issue.steps.length > 0 && (
+        <ol className="list-decimal list-inside space-y-1 text-sm text-[#94A3B8] break-words">
+          {issue.steps.map((step, i) => (
+            <li key={i}>{step}</li>
           ))}
-        </ul>
+        </ol>
       )}
+      {issue.evidence && (
+        <p className="text-xs text-[#94A3B8] break-words">
+          <span className="font-bold text-[#64748B] uppercase tracking-wider text-[10px]">Evidence </span>
+          {issue.evidence}
+        </p>
+      )}
+      {issue.recommendation && (
+        <p className="text-xs text-[#94A3B8] break-words">
+          <span className="font-bold text-[#00FF9D] uppercase tracking-wider text-[10px]">Fix </span>
+          {issue.recommendation}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        {isWebUrl(issue.page) ? (
+          <a
+            href={issue.page}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-mono text-[#C4A1FF] hover:text-white break-all inline-flex items-center gap-1"
+          >
+            {issue.page} <ExternalLink className="w-3 h-3 shrink-0" />
+          </a>
+        ) : (
+          <span className="text-xs font-mono text-[#64748B] break-all">{issue.page}</span>
+        )}
+        {issue.run_url && isWebUrl(issue.run_url) && (
+          <a
+            href={issue.run_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs font-bold text-[#64748B] hover:text-white inline-flex items-center gap-1"
+          >
+            TinyFish run <ExternalLink className="w-3 h-3 shrink-0" />
+          </a>
+        )}
+      </div>
     </div>
   );
 }

@@ -17,7 +17,9 @@ The MicroBounty base platform (human bounties, the agent marketplace and the esc
 - **TinyFish QA Tester Agent** — a paid agent that tests a live website in a real browser and returns a structured bug report.
 - **On-chain escrow payment verification with replay protection** — the agent's backend reads the escrow lock from Algorand before it runs, and each payment buys exactly one run.
 - **Live run streaming with resume** — the run is streamed to the browser step by step, and picked up again if the connection ends first.
-- **Judge verification using TinyFish Fetch** — the pages named in a report are fetched again and a Judge model checks the report against them.
+- **Page discovery using TinyFish Fetch** — the site's links and images are requested directly, and a 4xx/5xx answer is reported as a confirmed broken link or image.
+- **Per-issue Judge verification using TinyFish Fetch** — the page of each failed check is fetched again and a Judge model rules on that one finding: confirmed, needs review or rejected.
+- **Score and settlement worked out in code** — the score, the coverage and the release-or-refund decision are computed from the checks and the verdicts, not set by a model.
 - **Automatic on-chain release / refund** — a verified report releases the escrow to the agent; a rejected, incomplete or failed run refunds the client.
 - **Agent reputation from verified runs** — each agent's score is derived from the runs the Judge has ruled on.
 
@@ -140,10 +142,25 @@ A paid agent that tests a live website and is only paid when its report holds up
 2. **402** — an unpaid call to the `qa-agent` Edge Function returns HTTP 402 with the price and the contract to pay.
 3. **Lock 2 ALGO in escrow** — the user's wallet signs `lock_ai_payment`, which holds the payment in the contract and returns an on-chain task id.
 4. **The function verifies the lock on-chain** — it reads the task from Algorand and checks that it is pending, paid to the QA agent, fully paid and owned by the caller's wallet. Each task id can be used for one run only.
-5. **The TinyFish agent tests the site** — a real browser tries the primary form and the main links on up to 2 pages, and its steps are streamed to the user live.
-6. **The report is scored by a fixed rubric in code** — the score starts at 100 and loses 30, 20, 10 or 3 points per critical, high, medium or low issue. The agent does not set its own score.
-7. **The Judge verifies with fetched pages** — the pages named in the report are fetched again with the TinyFish Fetch API, and a Judge model rejects the report if a page does not exist or clearly contradicts it. A run that tested nothing, or made fewer than 3 checks and found no issues, is marked incomplete without going to the Judge.
-8. **The settler releases or refunds** — a dedicated settler account calls `release_ai_payment` for a verified report (90% to the agent's developer, 10% to the platform) or `refund_ai_payment` for a rejected, incomplete or failed run. The transaction id is shown to the user.
+5. **Page discovery** — alongside the agent, the function reads the submitted page with the TinyFish Fetch API and requests the page, its same-site links (12 pages at most) and its images (20 at most). A 4xx or 5xx answer is a confirmed broken link or broken image, with the URL and status as evidence. A 401, 403 or 429 is recorded as blocked, not as a defect.
+6. **The TinyFish agent runs a fixed checklist** — a real browser (TinyFish stealth profile) runs the same six checks on every site, and its steps are streamed to the user live:
+   - homepage loads
+   - primary navigation works
+   - primary form rejects an empty submit with a visible message
+   - primary form handles invalid data
+   - main call-to-action works
+   - no visible error messages or broken layout
+
+   Each check comes back as `pass`, `fail` or `blocked`, with the page, the action, what was observed and the steps. `blocked` means the check could not run (bot detection, login wall, timeout, nothing to test) and is never a defect. The agent also lists the pages it actually loaded.
+7. **Unsupported results are downgraded in code** — a navigation pass with no other same-site page among the loaded pages, an invalid-data check that only repeats the empty submit, and a pass with no observation all become `blocked`.
+8. **The Judge rules on each failed check** — the page of each failed check is fetched again with the TinyFish Fetch API. A Judge model sees that one check, the fetched content and the HTTP statuses from discovery, and answers `confirmed` (the evidence supports it), `needs_review` (the evidence cannot show it either way) or `rejected` (the evidence contradicts it, or it is not a defect of the site). Each confirmed issue gets one short recommendation.
+9. **Score and outcome are worked out in code** — neither the agent nor the Judge sets a number.
+   - Score = passed checks / (passed checks + confirmed failures) × 100. Confirmed failures are the checks the Judge confirmed plus the broken links and images from discovery. Blocked checks, needs-review issues and rejected issues do not change the score.
+   - Pages tested X of Y counts only pages the agent loaded in its browser; pages that were found but not loaded are listed as not tested.
+   - **Incomplete** (refund): fewer than 3 checks ran.
+   - **Rejected** (refund): the Judge rejected any failure the agent reported.
+   - **Verified** (release): everything else.
+10. **The settler releases or refunds** — a dedicated settler account calls `release_ai_payment` for a verified report (90% to the agent's developer, 10% to the platform) or `refund_ai_payment` for a rejected, incomplete or failed run. The transaction id is shown to the user.
 
 Verified and rejected runs feed the agent's reputation on its marketplace card.
 
@@ -201,6 +218,7 @@ MicroBounty features a **Bounty Nexus** — a real-time collaboration suite powe
 ## ⚠️ Known Limitations
 
 - **QA Tester Agent payment proof is not bound to the URL.** The `qa-agent` Edge Function accepts `{ task_id, wallet }` and checks the on-chain escrow lock, but it does not prove the caller owns that wallet. Task IDs and client addresses are public on-chain, so someone watching the contract could spend another user's pending payment on a run for their own URL. Planned fix: put a hash of the URL in the lock transaction's note and have the function check it.
+- **The Judge only sees static page content.** It cannot observe what happens after a click or a form submit, so a failure of that kind is usually marked needs review and does not lower the score. A check the agent wrongly reports as passed is not re-examined by the Judge.
 - **Anyone can call release or refund on an AI task.** `release_ai_payment` and `refund_ai_payment` do not check the sender. The `qa-agent` function settles each task from a dedicated settler account after the Judge verdict, but a client can still call `refund_ai_payment` on their own pending task as soon as the report arrives, and any account can release it. Fixing this needs a contract change that restricts both calls to a platform account.
 
 ---
@@ -211,9 +229,9 @@ MicroBounty features a **Bounty Nexus** — a real-time collaboration suite powe
 1. Connect Pera Wallet (Testnet) with at least 2.2 ALGO
 2. Go to **AI Tasks** → open **QA Tester Agent** → **Run a Task with this Agent**
 3. Enter a public website URL and confirm; approve the 2 ALGO escrow lock in your wallet
-4. Watch the run timeline and the live browser view while the agent tests the site (about 2 minutes)
-5. Read the report: score, issues with steps, what was tested and what was not
-6. Check the Judge badge (Verified / Rejected / Incomplete) and open the release or refund transaction on Lora
+4. Watch the run timeline and the live browser view while the agent tests the site (about 3 minutes)
+5. Read the report: the summary row (score, pages tested, confirmed, needs review), the six-check checklist, the confirmed and needs-review issues, and the pages that were not tested
+6. Check the outcome badge (Verified / Rejected / Incomplete) and open the release or refund transaction on Lora
 
 ### Test AI Agent Marketplace
 1. Connect Pera Wallet (Testnet)
