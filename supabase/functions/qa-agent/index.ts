@@ -88,7 +88,7 @@ Test in this order, and finish each step before starting the next:
 2. Links: follow the main navigation links or the most prominent call-to-action and check they load the pages they claim to.
 3. Broken things you come across on the way: error pages (404, 500), broken images, buttons that do nothing, visible error messages.
 What counts as an issue: a defect you saw happen. These are NOT issues and must not be reported: links that go to other domains, a form correctly showing a validation or "invalid credentials" message, slow loading during your own test, and anything the page itself describes as intentional or a demo.
-Anything you planned to test but did not, or could not finish, goes in the "untested" list as a short phrase. Never put an untested item in "issues". If you tested everything above, return an empty "untested" list.
+List every check you actually carried out in "tested", as short phrases such as "login form: empty submit". Anything you planned to test but did not, or could not finish, goes in "untested" as a short phrase. Never put an untested item in "issues". If you tested everything above, return an empty "untested" list.
 Report only what you actually observed in this run. Do not invent issues. If you run short of time, stop testing and report what you have.
 Severity: critical = the site or its main flow is unusable; high = a main feature fails or shows a server error; medium = a secondary feature fails; low = cosmetic.
 For each issue give the full URL of the page where it occurs and the exact steps to reproduce it. Put each step in its own array item, one short sentence per item, without numbering.`;
@@ -122,10 +122,11 @@ const QA_OUTPUT_SCHEMA = {
         required: ["severity", "title", "steps", "page"],
       },
     },
+    tested: { type: "array", maxItems: 30, items: { type: "string" } },
     untested: { type: "array", maxItems: 20, items: { type: "string" } },
   },
-  required: ["summary", "issues", "untested"],
-  propertyOrdering: ["summary", "issues", "untested"],
+  required: ["summary", "issues", "tested", "untested"],
+  propertyOrdering: ["summary", "issues", "tested", "untested"],
 };
 
 interface QaIssue {
@@ -139,6 +140,7 @@ interface QaReport {
   summary: string;
   score: number;
   issues: QaIssue[];
+  tested: string[];
   untested: string[];
 }
 
@@ -150,8 +152,10 @@ function parseReport(result: unknown): QaReport | null {
   const r = result as Record<string, unknown>;
   if (typeof r.summary !== "string" || !r.summary.trim()) return null;
   if (!Array.isArray(r.issues)) return null;
+  if (!Array.isArray(r.tested) || !r.tested.every((t) => typeof t === "string")) return null;
   if (!Array.isArray(r.untested) || !r.untested.every((u) => typeof u === "string")) return null;
 
+  const tested = (r.tested as string[]).map((t) => t.trim()).filter(Boolean);
   const untested = (r.untested as string[]).map((u) => u.trim()).filter(Boolean);
   const issues: QaIssue[] = [];
   for (const raw of r.issues) {
@@ -171,7 +175,7 @@ function parseReport(result: unknown): QaReport | null {
     }
     issues.push({ severity: i.severity, title: i.title, steps, page: i.page });
   }
-  return { summary: r.summary, score: scoreFromIssues(issues), issues, untested };
+  return { summary: r.summary, score: scoreFromIssues(issues), issues, tested, untested };
 }
 
 // ─── Small helpers ────────────────────────────────────────────
@@ -781,8 +785,8 @@ async function verifyAndComplete(ctx: RunContext, report: QaReport, emit: Emit):
   }
   emit({ type: "VERIFYING", run_id: ctx.runId, task_id: ctx.taskId, timestamp: new Date().toISOString() });
 
-  // Left things untested and found nothing: the client did not get a test, so refund
-  if (report.untested.length > 0 && report.issues.length === 0) {
+  // Tested nothing, or left more untested than tested: the client did not get a test, so refund
+  if (report.tested.length === 0 || report.untested.length > report.tested.length) {
     await settleAndComplete(ctx, report, false, { pages: [], incomplete: true }, emit);
     return;
   }
@@ -872,7 +876,7 @@ async function resumeRun(
 
     if (row.report) {
       // The report is in; verify it now if an earlier connection ran out of time
-      const { verification: saved, ...report } = { untested: [], ...row.report };
+      const { verification: saved, ...report } = { tested: [], untested: [], ...row.report };
       if (row.verified === null) {
         await verifyAndComplete(ctx, report as QaReport, emit);
       } else {
