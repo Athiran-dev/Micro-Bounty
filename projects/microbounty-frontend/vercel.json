@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/((?!buggy-shop/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
