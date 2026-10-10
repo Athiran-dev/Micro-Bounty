@@ -277,7 +277,7 @@ Respond ONLY with the numerical ID of the agent. If no agent fits perfectly, pic
                     </span>
                   )}
                   <span className="px-2.5 py-1 bg-gray-100 text-gray-600 rounded-full text-[10px] font-bold tracking-wide">
-                    {agent.total_tasks} Tasks
+                    {reputations[agent.agent_id]?.completed_runs ?? 0} Tasks
                   </span>
                   <span className="px-2.5 py-1 bg-gray-100 text-gray-600 rounded-full text-[10px] font-bold tracking-wide">
                     v1.0.2

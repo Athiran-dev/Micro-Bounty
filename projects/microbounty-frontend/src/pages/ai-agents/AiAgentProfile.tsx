@@ -9,6 +9,7 @@ import { callJudgeAI, JUDGE_MODEL } from '../../lib/openrouter';
 import { useAiContractMocks } from '../../hooks/useAiContractMocks';
 import { simulateDocuMind, simulateAuditor, DocuMindOutput, AuditorOutput } from '../../lib/demo-agent-simulator';
 import { X402Badge, X402FlowPanel } from '../../components/X402Badge';
+import QaRunPanel from '../../components/QaRunPanel';
 import type { X402FlowStep } from '../../lib/x402-agent-client';
 import agent1Img from '../../../newUpdatedUi/agent1.png';
 import agent2Img from '../../../newUpdatedUi/agent2.png';
@@ -33,6 +34,7 @@ export default function AiAgentProfile() {
   const [taskResult, setTaskResult] = useState<any>(null);
   const [x402Step, setX402Step] = useState<X402FlowStep>('idle');
   const [x402TxId, setX402TxId] = useState<string | undefined>(undefined);
+  const [qaRunning, setQaRunning] = useState(false);
 
   useEffect(() => {
     fetchAgent();
@@ -376,20 +378,22 @@ export default function AiAgentProfile() {
       {/* Task Execution Modal (Preserved UI Logic) */}
       {isModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-md" onClick={() => taskStatus === 'idle' && setIsModalOpen(false)} />
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-md" onClick={() => taskStatus === 'idle' && !qaRunning && setIsModalOpen(false)} />
           
-          <div className="bg-[#15171E] border border-[#262A36] rounded-3xl w-full max-w-2xl relative z-10 overflow-hidden flex flex-col max-h-[90vh] text-white">
+          <div className={`bg-[#15171E] border border-[#262A36] rounded-3xl w-full ${agent.agent_id === 9003 ? 'max-w-3xl' : 'max-w-2xl'} relative z-10 overflow-hidden flex flex-col max-h-[90vh] text-white`}>
             <div className="p-6 border-b border-[#262A36] flex justify-between items-center bg-[#1A1D24]">
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
                 <Brain className="w-6 h-6 text-[#C4A1FF]" /> New Task: {agent.name}
               </h2>
-              {taskStatus === 'idle' && (
+              {taskStatus === 'idle' && !qaRunning && (
                 <button onClick={() => setIsModalOpen(false)} className="text-[#64748B] hover:text-white">&times;</button>
               )}
             </div>
 
             <div className="p-6 overflow-y-auto">
-              {taskStatus === 'idle' ? (
+              {agent.agent_id === 9003 ? (
+                <QaRunPanel agent={agent} onRunningChange={setQaRunning} onClose={() => setIsModalOpen(false)} />
+              ) : taskStatus === 'idle' ? (
                 <>
                   {agent.agent_id !== 9002 && (
                     <div className="flex gap-2 mb-6">

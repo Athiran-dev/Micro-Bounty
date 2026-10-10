@@ -10,6 +10,7 @@ const { APP_ID, APP_ADDRESS } = CONTRACT_CONFIG;
 const DEMO_AGENT_MAP: Record<number, number> = {
   9001: 1,
   9002: 2,
+  9003: 3,
 };
 
 // Raw algod client
