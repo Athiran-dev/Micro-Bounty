@@ -16,6 +16,10 @@ import algosdk from "npm:algosdk@3";
 //  3. Valid           → the task_id is claimed in agent_runs (one run per
 //                       payment), TinyFish tests the site, and its SSE
 //                       events are streamed back to the caller.
+//                       Alongside, the submitted page is read with the
+//                       TinyFish Fetch API and every same-site link and image
+//                       on it is requested: a 4xx/5xx answer is a confirmed
+//                       broken link or image (DISCOVERY event, report.discovery).
 //
 //  POST { resume: true, payment: { task_id, wallet } }
 //    Picks up a run whose stream ended early (a PENDING event, or a dropped
@@ -80,6 +84,14 @@ const VERIFY_STEP_TIMEOUT_MS = 12_000;
 const VERIFY_MAX_PAGES = 5;
 const MIN_TESTED_CHECKS = 3;
 const VERIFY_PAGE_CHARS = 3_000;
+
+// Page discovery runs alongside the agent and has to be done well before it
+const DISCOVERY_MAX_PAGES = 12;
+const DISCOVERY_MAX_IMAGES = 20;
+const DISCOVERY_FETCH_TIMEOUT_MS = 12_000;
+const DISCOVERY_REQUEST_TIMEOUT_MS = 8_000;
+// Links to files are not pages
+const NOT_A_PAGE = /\.(png|jpe?g|gif|svg|webp|ico|css|js|json|xml|pdf|zip|gz|mp[34]|webm|woff2?|ttf)$/i;
 
 const AI_STATUS_PENDING = 0;
 
@@ -146,6 +158,7 @@ interface QaReport {
   issues: QaIssue[];
   tested: string[];
   untested: string[];
+  discovery?: Discovery;
 }
 
 // An "issue" that only says something was not tested is not a finding
@@ -506,6 +519,191 @@ function pendingEvent(taskId: number, runId: string): Record<string, unknown> {
   };
 }
 
+// ─── Page discovery: links and images on the submitted page ───
+
+type ProbeOutcome = "ok" | "broken" | "blocked" | "unreachable";
+
+interface Probe {
+  url: string;
+  status: number | null; // HTTP status, null when no response came back
+  outcome: ProbeOutcome;
+}
+
+interface DiscoveryIssue {
+  kind: "broken_link" | "broken_image";
+  severity: string;
+  title: string;
+  page: string; // the page the link or image is on
+  url: string;
+  http_status: number;
+  evidence: string;
+}
+
+interface Discovery {
+  source: string;
+  error?: string; // why the submitted page could not be read for links
+  pages: Probe[]; // the submitted page first, then its same-site links
+  images: Probe[];
+  issues: DiscoveryIssue[];
+}
+
+function siteKey(hostname: string): string {
+  return hostname.toLowerCase().replace(/^www\./, "");
+}
+
+/** The submitted page plus its same-site links, without fragments or duplicates. */
+function pageLinks(source: string, siteHosts: Set<string>, links: unknown[]): string[] {
+  const withoutHash = (u: URL) => {
+    u.hash = "";
+    return u.toString();
+  };
+  const pages = [withoutHash(new URL(source))];
+  for (const link of links) {
+    if (pages.length >= DISCOVERY_MAX_PAGES) break;
+    if (typeof link !== "string") continue;
+    let parsed: URL;
+    try {
+      parsed = new URL(link);
+    } catch {
+      continue;
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") continue;
+    if (!siteHosts.has(siteKey(parsed.hostname))) continue;
+    if (NOT_A_PAGE.test(parsed.pathname)) continue;
+    const url = withoutHash(parsed);
+    if (!pages.includes(url)) pages.push(url);
+  }
+  return pages;
+}
+
+function imageLinks(links: unknown[]): string[] {
+  const images: string[] = [];
+  for (const link of links) {
+    if (images.length >= DISCOVERY_MAX_IMAGES) break;
+    if (typeof link !== "string" || !/^https?:\/\//i.test(link)) continue; // skips data: URIs
+    if (!images.includes(link)) images.push(link);
+  }
+  return images;
+}
+
+/**
+ * Requests one URL and records its HTTP status. Redirects are not followed:
+ * a 3xx counts as working, and a redirect can never lead the request to a
+ * private address.
+ */
+async function probe(url: string): Promise<Probe> {
+  const checked = await validateTargetUrl(url);
+  if ("error" in checked) return { url, status: null, outcome: "unreachable" };
+  try {
+    const res = await fetch(checked.url, {
+      redirect: "manual",
+      headers: { "User-Agent": "MicroBounty-QA-Agent/1.0 (link check)", "Accept": "*/*" },
+      signal: AbortSignal.timeout(DISCOVERY_REQUEST_TIMEOUT_MS),
+    });
+    await res.body?.cancel().catch(() => {});
+    let outcome: ProbeOutcome = "broken";
+    if (res.status >= 200 && res.status < 400) outcome = "ok";
+    // The site refused this request; that says nothing about what a visitor sees
+    else if (res.status === 401 || res.status === 403 || res.status === 429) outcome = "blocked";
+    return { url, status: res.status, outcome };
+  } catch {
+    return { url, status: null, outcome: "unreachable" };
+  }
+}
+
+/**
+ * Reads the submitted page with the TinyFish Fetch API, then requests every
+ * same-site link and every image on it. A 4xx or 5xx answer is a confirmed
+ * broken link or image: the status code is the evidence, so no Judge is needed.
+ * Never throws.
+ */
+async function discoverPages(source: string, tinyfishKey: string): Promise<Discovery> {
+  const discovery: Discovery = { source, pages: [], images: [], issues: [] };
+  let links: unknown[] = [];
+  let images: unknown[] = [];
+  const siteHosts = new Set([siteKey(new URL(source).hostname)]);
+
+  try {
+    const res = await fetch(TINYFISH_FETCH, {
+      method: "POST",
+      headers: { "X-API-Key": tinyfishKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        urls: [source],
+        format: "markdown",
+        links: true,
+        image_links: true,
+        per_url_timeout_ms: 10_000,
+      }),
+      signal: AbortSignal.timeout(DISCOVERY_FETCH_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`TinyFish Fetch returned ${res.status}`);
+    const data = await res.json();
+    const hit = (data.results ?? [])[0];
+    if (hit) {
+      links = Array.isArray(hit.links) ? hit.links : [];
+      images = Array.isArray(hit.image_links) ? hit.image_links : [];
+      try {
+        siteHosts.add(siteKey(new URL(String(hit.final_url)).hostname));
+      } catch {
+        // no usable final_url
+      }
+    } else {
+      discovery.error = String((data.errors ?? [])[0]?.error ?? "not_returned");
+    }
+  } catch (err) {
+    console.error("[qa-agent] discovery fetch failed:", err);
+    discovery.error = err instanceof Error ? err.message : "discovery failed";
+  }
+
+  [discovery.pages, discovery.images] = await Promise.all([
+    Promise.all(pageLinks(source, siteHosts, links).map(probe)),
+    Promise.all(imageLinks(images).map(probe)),
+  ]);
+
+  for (const page of discovery.pages) {
+    if (page.outcome !== "broken" || page.status === null) continue;
+    discovery.issues.push({
+      kind: "broken_link",
+      severity: page.status >= 500 ? "high" : "medium",
+      title: page.url === discovery.pages[0].url
+        ? `The submitted page returns HTTP ${page.status}`
+        : `Broken link: ${new URL(page.url).pathname} returns HTTP ${page.status}`,
+      page: source,
+      url: page.url,
+      http_status: page.status,
+      evidence: `GET ${page.url} returned HTTP ${page.status}`,
+    });
+  }
+  for (const image of discovery.images) {
+    if (image.outcome !== "broken" || image.status === null) continue;
+    discovery.issues.push({
+      kind: "broken_image",
+      severity: "low",
+      title: `Broken image: ${image.url.split("/").pop() || image.url} returns HTTP ${image.status}`,
+      page: source,
+      url: image.url,
+      http_status: image.status,
+      evidence: `GET ${image.url} returned HTTP ${image.status}`,
+    });
+  }
+  return discovery;
+}
+
+/** Saves a finished discovery on the run and tells the caller about it. */
+function announceDiscovery(
+  supabase: Supabase,
+  taskId: number,
+  pending: Promise<Discovery>,
+  emit: Emit,
+): Promise<Discovery> {
+  return pending.then(async (discovery) => {
+    const { error } = await supabase.from("agent_runs").update({ discovery }).eq("task_id", taskId);
+    if (error) console.error("[qa-agent] could not save discovery:", error);
+    emit({ type: "DISCOVERY", task_id: taskId, discovery, timestamp: new Date().toISOString() });
+    return discovery;
+  });
+}
+
 // ─── Verification: re-fetch the reported pages, then ask the Judge ──
 
 interface RunContext {
@@ -515,6 +713,7 @@ interface RunContext {
   url: string;
   tinyfishKey: string;
   startedAt: number;
+  discovery: Promise<Discovery>;
 }
 
 interface PageEvidence {
@@ -861,6 +1060,7 @@ async function finishRun(
     await failRun(ctx, "INVALID_REPORT", "TinyFish finished without a usable QA report", emit);
     return;
   }
+  report.discovery = await ctx.discovery;
 
   const { error: saveErr } = await ctx.supabase
     .from("agent_runs")
@@ -882,7 +1082,7 @@ async function resumeRun(
 ): Promise<Response> {
   const { data: row, error } = await supabase
     .from("agent_runs")
-    .select("run_id, user_wallet, url, report, verified, created_at")
+    .select("run_id, user_wallet, url, report, verified, discovery, created_at")
     .eq("task_id", proof.taskId)
     .maybeSingle();
 
@@ -901,8 +1101,12 @@ async function resumeRun(
   const expiresAt = new Date(row.created_at).getTime() + RUN_EXPIRY_MS;
 
   return sse(async (emit) => {
-    const ctx: RunContext = { supabase, taskId: proof.taskId, runId, url: row.url, tinyfishKey, startedAt };
     emit({ type: "STARTED", run_id: runId, task_id: proof.taskId, resumed: true, timestamp: new Date().toISOString() });
+    // Discovery is repeated only when the first connection ended before saving it
+    const discovery: Promise<Discovery> = row.discovery || row.report
+      ? Promise.resolve(row.discovery ?? row.report.discovery)
+      : announceDiscovery(supabase, proof.taskId, discoverPages(row.url, tinyfishKey), emit);
+    const ctx: RunContext = { supabase, taskId: proof.taskId, runId, url: row.url, tinyfishKey, startedAt, discovery };
 
     if (row.report) {
       // The report is in; verify it now if an earlier connection ran out of time
@@ -1049,7 +1253,9 @@ serve(async (req: Request) => {
     return json({ success: false, error: "Could not record the run" }, 500);
   }
 
-  // ── 4. Start the TinyFish run ──
+  // ── 4. Discover the site's pages, then start the TinyFish run alongside ──
+  const discovering = discoverPages(target.url, tinyfishKey);
+
   const upstreamAbort = new AbortController();
   let upstream: Response;
   try {
@@ -1090,6 +1296,7 @@ serve(async (req: Request) => {
   return sse(async (emit) => {
     let runId: string | null = null;
     let windowClosed = false;
+    const discovery = announceDiscovery(supabase, proof.taskId, discovering, emit);
     const timer = setTimeout(() => {
       windowClosed = true;
       upstreamAbort.abort();
@@ -1110,7 +1317,7 @@ serve(async (req: Request) => {
         } else if (event.type === "COMPLETE") {
           runId = runId ?? String(event.run_id);
           await finishRun(
-            { supabase, taskId: proof.taskId, runId, url: target.url, tinyfishKey, startedAt },
+            { supabase, taskId: proof.taskId, runId, url: target.url, tinyfishKey, startedAt, discovery },
             event,
             emit,
           );
