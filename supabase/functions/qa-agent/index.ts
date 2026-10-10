@@ -28,8 +28,10 @@ import algosdk from "npm:algosdk@3";
 //  4. Report in      → the pages named in failed checks are fetched again
 //                       with the TinyFish Fetch API and a Judge model rules on
 //                       each failed check: confirmed, needs_review or rejected.
-//                       Any rejected failure rejects the report
-//                       (agent_runs.verified).
+//                       Score, coverage and the outcome are then worked out
+//                       in code (report.assessment): incomplete when fewer
+//                       than three checks ran, rejected when any failure was
+//                       rejected, otherwise verified (agent_runs.verified).
 //  5. Verdict in     → the escrow is settled on-chain: release to the agent
 //                       when verified, refund to the client when rejected.
 //
@@ -65,6 +67,8 @@ const FALLBACK_PRICE_MICROALGO = Number(Deno.env.get("QA_AGENT_PRICE_MICROALGO")
 
 const TINYFISH_RUN_SSE = "https://agent.tinyfish.ai/v1/automation/run-sse";
 const TINYFISH_RUNS = "https://agent.tinyfish.ai/v1/runs";
+// The run's page in the TinyFish dashboard, as the TinyFish CLI prints it
+const TINYFISH_RUN_PAGE = "https://agent.tinyfish.ai/runs";
 // Supabase stops an Edge Function worker after 150s on the free plan, and
 // max_duration_seconds is a soft stop: in testing TinyFish needed about 60s
 // more to write its report. A run that outlives one connection is picked up
@@ -83,7 +87,8 @@ const VERIFY_LATEST_START_MS = 118_000;
 const SETTLE_LATEST_START_MS = 130_000;
 const VERIFY_STEP_TIMEOUT_MS = 12_000;
 const VERIFY_MAX_PAGES = 5;
-const MIN_TESTED_CHECKS = 3;
+// A run in which fewer checks than this actually ran is incomplete and refunded
+const MIN_CHECKS_RAN = 3;
 const VERIFY_PAGE_CHARS = 3_000;
 
 // Page discovery runs alongside the agent and has to be done well before it
@@ -130,17 +135,6 @@ Keep the report short: writing it must take only a few seconds. Always return al
 In "pages_visited" list the full URL of every page you actually loaded in this run, and no others.
 In "summary" describe the result in two sentences.
 Report only what you actually observed in this run. Do not invent anything.`;
-
-const SEVERITIES = ["critical", "high", "medium", "low"];
-
-// The score is worked out here, not by the agent: in testing its own
-// arithmetic did not match the issues it listed.
-const SEVERITY_PENALTY: Record<string, number> = { critical: 30, high: 20, medium: 10, low: 3 };
-
-function scoreFromIssues(issues: QaIssue[]): number {
-  const lost = issues.reduce((sum, issue) => sum + SEVERITY_PENALTY[issue.severity], 0);
-  return Math.max(0, 100 - lost);
-}
 
 const QA_OUTPUT_SCHEMA = {
   type: "object",
@@ -201,11 +195,42 @@ interface QaReport {
   checks: QaCheck[];
   pages_visited: string[];
   // Derived from the checks, in the shape the first version of the report had
-  score: number;
+  score: number | null; // set with the assessment, once the Judge has ruled
   issues: QaIssue[];
   tested: string[];
   untested: string[];
   discovery?: Discovery;
+  assessment?: Assessment;
+}
+
+interface ReportIssue {
+  source: string; // "check" (found by the agent) or "discovery" (found by requesting the URL)
+  id: string;
+  title: string;
+  severity: string;
+  page: string;
+  observed: string;
+  steps: string[];
+  evidence: string;
+  recommendation: string;
+  run_url: string | null; // the TinyFish run that found it; null for discovery issues
+}
+
+// Everything in here is worked out in code from the checks, the Judge's
+// verdicts and discovery. Neither the agent nor the Judge sets a number.
+interface Assessment {
+  outcome: string; // "verified" | "rejected" | "incomplete"
+  score: number | null;
+  checks_total: number;
+  checks_ran: number;
+  checks_passed: number;
+  pages_tested: number;
+  pages_total: number;
+  pages_not_tested: string[];
+  confirmed: ReportIssue[];
+  needs_review: ReportIssue[];
+  rejected: ReportIssue[];
+  run_url: string;
 }
 
 /** A page URL without its fragment or trailing slash, for comparing pages. */
@@ -336,7 +361,7 @@ function parseReport(result: unknown, sourceUrl: string): QaReport | null {
     summary: r.summary,
     checks,
     pages_visited: pagesVisited,
-    score: scoreFromIssues(issues),
+    score: null,
     issues,
     tested: checks.filter((check) => check.status !== "blocked").map((check) => check.name),
     untested: checks.filter((check) => check.status === "blocked").map((check) => check.name),
@@ -1012,6 +1037,86 @@ Return JSON only in this exact format without markdown blocks:
   return judgement;
 }
 
+/**
+ * Builds the final assessment of a run.
+ * score = passed / (passed + confirmed failures) * 100. Blocked checks and
+ * issues the Judge marked needs_review or rejected do not move it. An
+ * incomplete run has no score.
+ * Pages: only pages the agent actually loaded count as tested.
+ */
+function assess(ctx: RunContext, report: QaReport, outcome: string): Assessment {
+  const runUrl = `${TINYFISH_RUN_PAGE}/${ctx.runId}`;
+
+  const fromCheck = (check: QaCheck): ReportIssue => ({
+    source: "check",
+    id: check.id,
+    title: check.name,
+    severity: check.severity,
+    page: check.page,
+    observed: check.observed,
+    steps: check.steps,
+    evidence: check.judge?.reasoning ?? "",
+    recommendation: check.judge?.recommendation ?? "",
+    run_url: runUrl,
+  });
+  const judged = (verdict: string) =>
+    report.checks.filter((check) => check.status === "fail" && check.judge?.verdict === verdict).map(fromCheck);
+
+  // Broken links and images are confirmed by their HTTP status alone
+  const fromDiscovery: ReportIssue[] = (report.discovery?.issues ?? []).map((issue) => ({
+    source: "discovery",
+    id: issue.kind,
+    title: issue.title,
+    severity: issue.severity,
+    page: issue.page,
+    observed: `HTTP ${issue.http_status}`,
+    steps: [`Open ${issue.page}`, `Request ${issue.url}`],
+    evidence: issue.evidence,
+    recommendation: issue.kind === "broken_image"
+      ? "Restore the image file or point the image to one that exists."
+      : "Restore the page or remove the link to it.",
+    run_url: null,
+  }));
+
+  const confirmed = [...judged("confirmed"), ...fromDiscovery];
+  const passed = report.checks.filter((check) => check.status === "pass").length;
+  const ran = report.checks.filter((check) => check.status !== "blocked").length;
+  const scored = passed + confirmed.length;
+
+  const site = siteKey(new URL(ctx.url).hostname);
+  const onSite = (url: string) => {
+    try {
+      return siteKey(new URL(url).hostname) === site;
+    } catch {
+      return false;
+    }
+  };
+  const visited = new Set(report.pages_visited.filter(onSite).map(pageKey));
+  const known = new Set(visited);
+  const notTested: string[] = [];
+  for (const page of report.discovery?.pages ?? []) {
+    const key = pageKey(page.url);
+    if (known.has(key)) continue;
+    known.add(key);
+    notTested.push(page.url);
+  }
+
+  return {
+    outcome,
+    score: outcome === "incomplete" || scored === 0 ? null : Math.round((passed / scored) * 100),
+    checks_total: report.checks.length,
+    checks_ran: ran,
+    checks_passed: passed,
+    pages_tested: visited.size,
+    pages_total: known.size,
+    pages_not_tested: notTested,
+    confirmed,
+    needs_review: judged("needs_review"),
+    rejected: judged("rejected"),
+    run_url: runUrl,
+  };
+}
+
 function completeEvent(
   ctx: RunContext,
   report: QaReport,
@@ -1144,7 +1249,7 @@ async function settleAndComplete(
 
   const { error: saveErr } = await ctx.supabase
     .from("agent_runs")
-    .update({ verified, report: { ...report, verification } })
+    .update({ verified, score: report.score, report: { ...report, verification } })
     .eq("task_id", ctx.taskId);
   if (saveErr) console.error("[qa-agent] could not save verification:", saveErr);
 
@@ -1162,9 +1267,10 @@ async function verifyAndComplete(ctx: RunContext, report: QaReport, emit: Emit):
   }
   emit({ type: "VERIFYING", run_id: ctx.runId, task_id: ctx.taskId, timestamp: new Date().toISOString() });
 
-  // Tested nothing, or barely anything with nothing found: the client did not get a test, so refund.
-  // Every other report goes to the Judge.
-  if (report.tested.length === 0 || (report.tested.length < MIN_TESTED_CHECKS && report.issues.length === 0)) {
+  // Incomplete: fewer than three checks actually ran, so the client did not get a test. Refund, no Judge.
+  if (report.checks.filter((check) => check.status !== "blocked").length < MIN_CHECKS_RAN) {
+    report.assessment = assess(ctx, report, "incomplete");
+    report.score = null;
     await settleAndComplete(ctx, report, false, { pages: [], incomplete: true }, emit);
     return;
   }
@@ -1197,8 +1303,10 @@ async function verifyAndComplete(ctx: RunContext, report: QaReport, emit: Emit):
     } else {
       verification.issues = { confirmed: 0, needs_review: 0, rejected: 0 };
     }
-    // A report is rejected when the Judge threw out any failure it reported
+    // Rejected (refund) when the Judge threw out any failure the report made; otherwise verified (release)
     verified = verification.issues.rejected === 0;
+    report.assessment = assess(ctx, report, verified ? "verified" : "rejected");
+    report.score = report.assessment.score;
   } catch (err) {
     console.error("[qa-agent] verification failed:", err);
     verification.error = err instanceof Error ? err.message : "verification failed";
