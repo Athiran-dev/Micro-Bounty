@@ -151,6 +151,12 @@ MicroBounty features a **Bounty Nexus** — a real-time collaboration suite powe
 
 ---
 
+## ⚠️ Known Limitations
+
+- **QA Tester Agent payment proof is not bound to the URL.** The `qa-agent` Edge Function accepts `{ task_id, wallet }` and checks the on-chain escrow lock, but it does not prove the caller owns that wallet. Task IDs and client addresses are public on-chain, so someone watching the contract could spend another user's pending payment on a run for their own URL. Planned fix: put a hash of the URL in the lock transaction's note and have the function check it.
+
+---
+
 ## 🏆 For Developers & Users — Quick Test Guide
 
 ### Test AI Agent Marketplace
