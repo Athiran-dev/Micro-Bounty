@@ -27,6 +27,9 @@ import algosdk from "npm:algosdk@3";
 //  5. Verdict in     → the escrow is settled on-chain: release to the agent
 //                       when verified, refund to the client when rejected.
 //
+//  A started run that fails is refunded the same way, and its ERROR event
+//  carries the refund transaction id.
+//
 //  Every stream ends with exactly one of COMPLETE, ERROR or PENDING. It never
 //  carries a made-up report: a run that fails, times out or returns the wrong
 //  shape ends with an ERROR event.
@@ -806,6 +809,31 @@ async function verifyAndComplete(ctx: RunContext, report: QaReport, emit: Emit):
   await settleAndComplete(ctx, report, verified, verification, emit);
 }
 
+/**
+ * Ends the stream with ERROR for a run that started but produced no usable
+ * report, after refunding the client: nothing was delivered for the payment.
+ */
+async function failRun(ctx: RunContext, code: string, message: string, emit: Emit): Promise<void> {
+  let settlement: Settlement;
+  if (Date.now() - ctx.startedAt > SETTLE_LATEST_START_MS) {
+    settlement = { action: "refund", status: "pending", reason: "Call again with resume: true to refund on-chain" };
+  } else {
+    emit({ type: "SETTLING", run_id: ctx.runId, task_id: ctx.taskId, timestamp: new Date().toISOString() });
+    settlement = await settleOnChain(ctx.taskId, false);
+  }
+
+  emit({
+    type: "ERROR",
+    run_id: ctx.runId,
+    task_id: ctx.taskId,
+    code,
+    message,
+    settlement,
+    refund_txid: settlement.status === "confirmed" ? settlement.txid : null,
+    timestamp: new Date().toISOString(),
+  });
+}
+
 /** Handles a finished TinyFish run: saves a usable report, then verifies it. */
 async function finishRun(
   ctx: RunContext,
@@ -817,18 +845,18 @@ async function finishRun(
   if (run.status !== "COMPLETED") {
     const err = (run.error && typeof run.error === "object" ? run.error : {}) as Record<string, unknown>;
     const message = typeof run.error === "string" ? run.error : err.message;
-    emit({
-      type: "ERROR",
-      ...base,
-      code: String(err.code ?? `RUN_${run.status}`),
-      message: String(message ?? "TinyFish run did not complete"),
-    });
+    await failRun(
+      ctx,
+      String(err.code ?? `RUN_${run.status}`),
+      String(message ?? "TinyFish run did not complete"),
+      emit,
+    );
     return;
   }
 
   const report = parseReport(run.result);
   if (!report) {
-    emit({ type: "ERROR", ...base, code: "INVALID_REPORT", message: "TinyFish finished without a usable QA report" });
+    await failRun(ctx, "INVALID_REPORT", "TinyFish finished without a usable QA report", emit);
     return;
   }
 
@@ -909,14 +937,12 @@ async function resumeRun(
       if (Date.now() > expiresAt) {
         await fetch(`${TINYFISH_RUNS}/${runId}/cancel`, { method: "POST", headers: { "X-API-Key": tinyfishKey } })
           .catch(() => {});
-        emit({
-          type: "ERROR",
-          run_id: runId,
-          task_id: proof.taskId,
-          code: "TIMEOUT",
-          message: `The run did not finish within ${RUN_EXPIRY_MS / 60_000} minutes and was cancelled`,
-          timestamp: new Date().toISOString(),
-        });
+        await failRun(
+          ctx,
+          "TIMEOUT",
+          `The run did not finish within ${RUN_EXPIRY_MS / 60_000} minutes and was cancelled`,
+          emit,
+        );
         return;
       }
 
@@ -1100,12 +1126,14 @@ serve(async (req: Request) => {
     if (runId) {
       emit(pendingEvent(proof.taskId, runId));
     } else {
+      // Nothing ran, so the payment can be used for another attempt
+      await supabase.from("agent_runs").delete().eq("task_id", proof.taskId);
       emit({
         type: "ERROR",
         run_id: null,
         task_id: proof.taskId,
         code: "STREAM_ENDED",
-        message: "TinyFish closed the stream before the run started",
+        message: "TinyFish closed the stream before the run started. Your payment was not used; you can try again with the same task.",
         timestamp: new Date().toISOString(),
       });
     }

@@ -60,6 +60,8 @@ export interface QaEvent {
   verification?: QaVerification | null;
   code?: string;
   message?: string;
+  settlement?: QaSettlement;
+  refund_txid?: string | null;
 }
 
 export interface QaPayment {
@@ -139,10 +141,14 @@ export async function runQaAgent(
   onEvent: (event: QaEvent) => void,
   onResume?: (attempt: number) => void
 ): Promise<QaEvent> {
+  // Finished means COMPLETE, or ERROR whose refund is not still waiting on another call
+  const finished = (event: QaEvent | null) =>
+    !!event && event.type !== 'PENDING' && !(event.type === 'ERROR' && event.settlement?.status === 'pending');
+
   let last = await streamOnce({ url, payment }, onEvent);
 
   for (let attempt = 1; attempt <= MAX_RESUMES; attempt++) {
-    if (last && last.type !== 'PENDING') return last;
+    if (last && finished(last)) return last;
     onResume?.(attempt);
     last = await streamOnce({ resume: true, payment }, onEvent);
   }

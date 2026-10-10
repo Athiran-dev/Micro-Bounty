@@ -52,6 +52,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
   const [report, setReport] = useState<QaReport | null>(null);
   const [finalEvent, setFinalEvent] = useState<QaEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorEvent, setErrorEvent] = useState<QaEvent | null>(null);
 
   const nextId = useRef(0);
   const seen = useRef({ started: false, live: false });
@@ -124,6 +125,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
     setReport(null);
     setFinalEvent(null);
     setError(null);
+    setErrorEvent(null);
     setTaskId(null);
     seen.current = { started: false, live: false };
 
@@ -157,6 +159,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
       );
 
       if (last.type === 'ERROR') {
+        setErrorEvent(last);
         setError(`${last.message || 'The run failed'}${last.code ? ` (${last.code})` : ''}`);
       }
     } catch (e: any) {
@@ -297,9 +300,22 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
           <div>
             <h3 className="text-base font-bold text-red-400 mb-1">The run did not produce a report</h3>
             <p className="text-sm text-[#94A3B8] break-words">{error}</p>
-            {taskId !== null && (
+            {errorEvent?.refund_txid ? (
+              <p className="text-xs text-[#94A3B8] mt-2">
+                Your payment was refunded to your wallet:{' '}
+                <a
+                  href={loraTransactionUrl(errorEvent.refund_txid)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-bold font-mono text-[#C4A1FF] hover:text-white inline-flex items-center gap-1"
+                >
+                  {errorEvent.refund_txid.slice(0, 8)}…{errorEvent.refund_txid.slice(-6)} <ExternalLink className="w-3 h-3" />
+                </a>
+              </p>
+            ) : taskId !== null && (
               <p className="text-xs text-[#64748B] mt-2">
                 Your payment for task #{taskId} is still locked in escrow and has not been released.
+                {errorEvent?.settlement?.reason ? ` Refund ${errorEvent.settlement.status}: ${errorEvent.settlement.reason}` : ''}
               </p>
             )}
           </div>
