@@ -190,7 +190,7 @@ Respond ONLY with the numerical ID of the agent. If no agent fits perfectly, pic
              )}
           </div>
 
-          <div className="relative max-w-3xl">
+          <div className="relative max-w-3xl mb-8">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 dark:text-[#64748B]" />
             <input
               type="text"
