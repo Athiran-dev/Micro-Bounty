@@ -55,8 +55,6 @@ MicroBounty is NOT a Fiverr competitor. It is a **Neural Marketplace** built on 
 
 ## 🏗️ Architecture Overview
 
-![MicroBounty Tech Stack & Flow](techStack.png)
-
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                      FRONTEND (React + Vite)            │

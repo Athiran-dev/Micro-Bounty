@@ -501,14 +501,14 @@ export default function AiAgentProfile() {
                 <div className="py-6 flex flex-col items-center justify-center text-center">
                   <div className="w-14 h-14 border-4 border-[#C4A1FF]/30 border-t-[#C4A1FF] rounded-full animate-spin mb-4" />
                   <h3 className="text-lg font-bold text-white mb-1">
-                    {taskStatus === 'locking' && 'Processing x402 Payment...'}
+                    {taskStatus === 'locking' && 'Locking payment in escrow...'}
                     {taskStatus === 'processing' && 'Agent is processing your task...'}
                     {taskStatus === 'judging' && 'Judge AI is verifying the output...'}
                   </h3>
                   <p className="text-[#94A3B8] text-sm max-w-sm mb-3">
                     {taskStatus === 'locking' && 'Approve the Algorand transaction in Lute or Pera Wallet.'}
                     {taskStatus === 'processing' && 'The agent is executing securely off-chain.'}
-                    {taskStatus === 'judging' && 'Gemini Flash is evaluating the output to determine payment release.'}
+                    {taskStatus === 'judging' && 'Judge AI is evaluating the output to determine payment release.'}
                   </p>
                   {/* x402 flow panel — shown during the locking / payment phase */}
                   {taskStatus === 'locking' && (

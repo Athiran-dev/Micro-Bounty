@@ -52,7 +52,7 @@ export function X402Badge({ flowStep = 'idle', compact = false, className = '' }
 
         {!compact && (
           <span className="text-[10px] font-bold uppercase tracking-widest whitespace-nowrap">
-            x402
+            402 Escrow
           </span>
         )}
 
@@ -69,10 +69,10 @@ export function X402Badge({ flowStep = 'idle', compact = false, className = '' }
       {showTooltip && (
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-56 pointer-events-none">
           <div className="bg-[#1A1D24] border border-[#2D3142] rounded-xl p-3 shadow-xl shadow-black/40">
-            <p className="text-[11px] font-bold text-[#C4A1FF] mb-1">⚡ x402 Payment Protocol</p>
+            <p className="text-[11px] font-bold text-[#C4A1FF] mb-1">⚡ 402 payment handshake</p>
             <p className="text-[10px] text-[#64748B] leading-relaxed">
-              This agent accepts payments via HTTP 402 on Algorand.
-              Your wallet signs automatically — no manual steps.
+              Backed by on-chain escrow on Algorand. Your payment is locked
+              in the contract before the agent runs; you approve it in your wallet.
             </p>
             {flowStep !== 'idle' && (
               <p className="text-[10px] text-[#94A3B8] mt-2 pt-2 border-t border-[#2D3142]">
@@ -119,7 +119,7 @@ export function X402FlowPanel({ step, txId }: X402FlowPanelProps) {
       <div className="flex items-center gap-2 mb-4">
         <Zap className="w-4 h-4 text-[#C4A1FF]" />
         <span className="text-xs font-bold text-[#C4A1FF] uppercase tracking-widest">
-          x402 Payment Flow
+          Escrow Payment Flow
         </span>
       </div>
 
