@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Chai &amp; Co. — Buggy Shop (QA demo)</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: #faf7f2; color: #2b2118; line-height: 1.5; }
+      a { color: #9a4b1f; }
+      .demo-banner { background: #2b2118; color: #ffd9a8; text-align: center; padding: 10px 16px; font-size: 14px; font-weight: 600; }
+      header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 18px 32px; background: #fff; border-bottom: 1px solid #eadfce; }
+      .logo { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+      nav a { margin-left: 22px; text-decoration: none; font-weight: 600; }
+      nav a:hover { text-decoration: underline; }
+      .hero { padding: 56px 32px; text-align: center; background: linear-gradient(135deg, #f6e3c5, #f3c9a0); }
+      .hero h1 { margin: 0 0 10px; font-size: 40px; letter-spacing: -1px; }
+      .hero p { margin: 0 0 24px; font-size: 18px; }
+      .button { display: inline-block; background: #9a4b1f; color: #fff; border: 0; border-radius: 10px; padding: 13px 26px; font-size: 16px; font-weight: 700; text-decoration: none; cursor: pointer; }
+      .button:hover { background: #7d3b16; }
+      main { max-width: 980px; margin: 0 auto; padding: 40px 24px 64px; }
+      h2 { font-size: 26px; margin: 0 0 18px; }
+      .products { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 20px; margin-bottom: 56px; }
+      .product { background: #fff; border: 1px solid #eadfce; border-radius: 14px; overflow: hidden; }
+      .product img { display: block; width: 100%; height: 170px; object-fit: cover; background: #f1e7d8; }
+      .product div { padding: 14px 16px 18px; }
+      .product h3 { margin: 0 0 4px; font-size: 18px; }
+      .price { font-weight: 800; color: #9a4b1f; }
+      .signup { background: #fff; border: 1px solid #eadfce; border-radius: 14px; padding: 28px; max-width: 520px; }
+      label { display: block; font-weight: 600; margin: 14px 0 6px; }
+      input { width: 100%; padding: 11px 12px; border: 1px solid #d8c9b2; border-radius: 8px; font-size: 15px; }
+      .signup .button { margin-top: 20px; width: 100%; }
+      .form-error { display: none; margin-top: 16px; padding: 12px 14px; border-radius: 8px; background: #fde8e6; border: 1px solid #f0b4ad; color: #a3271b; font-weight: 600; }
+      footer { text-align: center; padding: 26px; border-top: 1px solid #eadfce; font-size: 14px; color: #7a6a58; }
+    </style>
+  </head>
+  <body>
+    <div class="demo-banner" role="note">Demo site with intentional bugs for testing the QA agent.</div>
+
+    <header>
+      <div class="logo">☕ Chai &amp; Co.</div>
+      <nav aria-label="Main">
+        <a href="index.html">Home</a>
+        <a href="#products">Products</a>
+        <!-- Planted bug 1: this page does not exist -->
+        <a href="shipping-and-returns.html">Shipping &amp; Returns</a>
+        <a href="#signup">Sign up</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <h1>Small-batch chai, delivered fresh</h1>
+      <p>Hand-blended masala chai from Assam and Darjeeling estates.</p>
+      <a class="button" href="#signup">Join the Chai Club</a>
+    </section>
+
+    <main>
+      <section id="products">
+        <h2>Our blends</h2>
+        <div class="products">
+          <article class="product">
+            <img
+              alt="Classic Masala Chai tin"
+              src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='240'%3E%3Crect width='400' height='240' fill='%23c8793d'/%3E%3Ccircle cx='200' cy='120' r='62' fill='%23f6e3c5'/%3E%3Ctext x='200' y='130' font-size='26' font-family='sans-serif' font-weight='700' text-anchor='middle' fill='%237d3b16'%3EMasala%3C/text%3E%3C/svg%3E"
+            />
+            <div>
+              <h3>Classic Masala Chai</h3>
+              <p>Cardamom, ginger and clove. 100 g tin.</p>
+              <span class="price">₹349</span>
+            </div>
+          </article>
+
+          <article class="product">
+            <img
+              alt="Kashmiri Kahwa tin"
+              src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='240'%3E%3Crect width='400' height='240' fill='%236f8f4e'/%3E%3Ccircle cx='200' cy='120' r='62' fill='%23eef3df'/%3E%3Ctext x='200' y='130' font-size='26' font-family='sans-serif' font-weight='700' text-anchor='middle' fill='%233f5527'%3EKahwa%3C/text%3E%3C/svg%3E"
+            />
+            <div>
+              <h3>Kashmiri Kahwa</h3>
+              <p>Green tea with saffron and almond. 100 g tin.</p>
+              <span class="price">₹429</span>
+            </div>
+          </article>
+
+          <article class="product">
+            <!-- Planted bug 2: this image file does not exist -->
+            <img alt="Rose Cardamom Chai tin" src="images/rose-cardamom-chai.jpg" />
+            <div>
+              <h3>Rose Cardamom Chai</h3>
+              <p>Black tea with rose petals. 100 g tin.</p>
+              <span class="price">₹389</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="signup">
+        <h2>Join the Chai Club</h2>
+        <form class="signup" id="signup-form" novalidate>
+          <p>Get 10% off your first order and a new blend every month.</p>
+          <label for="name">Name</label>
+          <input id="name" name="name" type="text" autocomplete="off" />
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" autocomplete="off" />
+          <button class="button" type="submit">Create my account</button>
+          <div class="form-error" id="form-error" role="alert">
+            Error 500: we could not create your account. Please try again later.
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <footer>© 2026 Chai &amp; Co. — a fictional shop. Nothing here is for sale.</footer>
+
+    <script>
+      // Planted bug 3: the sign-up always fails, whatever is entered. Nothing is sent anywhere.
+      document.getElementById('signup-form').addEventListener('submit', function (event) {
+        event.preventDefault();
+        document.getElementById('form-error').style.display = 'block';
+      });
+    </script>
+  </body>
+</html>
