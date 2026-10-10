@@ -134,7 +134,7 @@ MicroBounty features a **Bounty Nexus** — a real-time collaboration suite powe
 | Resource | Link |
 |----------|------|
 | 🚀 Live App | [micro-bounty-two.vercel.app](https://micro-bounty-two.vercel.app) |
-| 📋 Smart Contract | [App ID: 762671388](https://testnet.algoexplorer.io/application/762671388) |
+| 📋 Smart Contract | [App ID: 773988811](https://testnet.algoexplorer.io/application/773988811) |
 | 🎬 Demo Video | [Watch on YouTube](#) |
 
 ---
@@ -144,10 +144,10 @@ MicroBounty features a **Bounty Nexus** — a real-time collaboration suite powe
 | Field | Value |
 |-------|-------|
 | Network | Algorand Testnet |
-| App ID | `762671388` |
-| App Address | `3Z7TJUWMDTTC2U5U7UZD6NFM63YNPZV5IWWC6E7HF6KZWDWTFAMT7IMZAE` |
+| App ID | `773988811` |
+| App Address | `QJN7NFN3ZPVHTXRCVJQWLTFJ5V6RB6ADTCPJG5ECLVIEAW3MYPZXXFRCCA` |
 | Deployer | `B73L4PZTV6LO3CVKNA7M7UJKV2XFIBKJR47JQGOGQ75XLXGPMOPNCX5HWE` |
-| Explorer | [View on Algoexplorer](https://testnet.algoexplorer.io/application/762671388) |
+| Explorer | [View on Algoexplorer](https://testnet.algoexplorer.io/application/773988811) |
 
 ---
 
@@ -196,8 +196,8 @@ poetry install
 
 ### Required Environment Variables
 ```env
-VITE_APP_ID=762671388
-VITE_APP_ADDRESS=3Z7TJUWMDTTC2U5U7UZD6NFM63YNPZV5IWWC6E7HF6KZWDWTFAMT7IMZAE
+VITE_APP_ID=773988811
+VITE_APP_ADDRESS=QJN7NFN3ZPVHTXRCVJQWLTFJ5V6RB6ADTCPJG5ECLVIEAW3MYPZXXFRCCA
 VITE_SUPABASE_URL=your_url
 VITE_SUPABASE_ANON_KEY=your_key
 VITE_OPENROUTER_API_KEY=your_key
