@@ -134,7 +134,7 @@ MicroBounty features a **Bounty Nexus** — a real-time collaboration suite powe
 | Resource | Link |
 |----------|------|
 | 🚀 Live App | [micro-bounty-two.vercel.app](https://micro-bounty-two.vercel.app) |
-| 📋 Smart Contract | [App ID: 773988811](https://testnet.algoexplorer.io/application/773988811) |
+| 📋 Smart Contract | [App ID: 773988811](https://lora.algokit.io/testnet/application/773988811) |
 | 🎬 Demo Video | [Watch on YouTube](#) |
 
 ---
@@ -147,7 +147,7 @@ MicroBounty features a **Bounty Nexus** — a real-time collaboration suite powe
 | App ID | `773988811` |
 | App Address | `QJN7NFN3ZPVHTXRCVJQWLTFJ5V6RB6ADTCPJG5ECLVIEAW3MYPZXXFRCCA` |
 | Deployer | `B73L4PZTV6LO3CVKNA7M7UJKV2XFIBKJR47JQGOGQ75XLXGPMOPNCX5HWE` |
-| Explorer | [View on Algoexplorer](https://testnet.algoexplorer.io/application/773988811) |
+| Explorer | [View on Lora](https://lora.algokit.io/testnet/application/773988811) |
 
 ---
 
@@ -172,7 +172,7 @@ MicroBounty features a **Bounty Nexus** — a real-time collaboration suite powe
 4. Watch instant on-chain payout
 
 ### Testnet ALGO Faucet
-Get free testnet ALGO: https://testnet.algoexplorer.io/dispenser
+Get free testnet ALGO: https://lora.algokit.io/testnet/fund
 
 ---
 
