@@ -97,17 +97,38 @@ const AI_STATUS_PENDING = 0;
 
 // ─── TinyFish goal ────────────────────────────────────────────
 
+// The same ordered checks run on every site, so two reports can be compared.
+// Severity is fixed per check here; the agent only reports what it saw.
+const CHECKS = [
+  { id: "homepage_loads", name: "Homepage loads", severity: "critical" },
+  { id: "primary_navigation", name: "Primary navigation works", severity: "high" },
+  { id: "form_empty_submit", name: "Primary form rejects an empty submit with a visible message", severity: "medium" },
+  { id: "form_invalid_data", name: "Primary form handles invalid data", severity: "medium" },
+  { id: "main_cta", name: "Main call-to-action works", severity: "high" },
+  { id: "no_visible_errors", name: "No visible error messages or broken layout", severity: "medium" },
+];
+const CHECK_STATUSES = ["pass", "fail", "blocked"];
+
 const QA_GOAL = `You are a QA tester checking this website as a first-time visitor. You have about 60 seconds, so work quickly and finish with a report.
-Scope: stay on this site's own domain and visit at most 2 pages, starting with the page you are given.
-Test in this order, and finish each step before starting the next:
-1. Primary form: find the most important form within those 2 pages (login, sign-up, search or contact). Submit it once empty and once with obviously fake test data, and note how it responds. Never enter real personal data, never pay, never create a real account.
-2. Links: follow the main navigation links or the most prominent call-to-action and check they load the pages they claim to.
-3. Broken things you come across on the way: error pages (404, 500), broken images, buttons that do nothing, visible error messages.
-What counts as an issue: a defect you saw happen. These are NOT issues and must not be reported: links that go to other domains, a form correctly showing a validation or "invalid credentials" message, and slow loading during your own test. A banner saying the site is a demo or a test site does not excuse a defect: still report what breaks.
-List every check you actually carried out in "tested", as short phrases such as "login form: empty submit". Anything you planned to test but did not, or could not finish, goes in "untested" as a short phrase: list at most 3 items, the most important ones. Never put an untested item in "issues". If you tested everything above, return an empty "untested" list.
-Report only what you actually observed in this run. Do not invent issues. If you run short of time, stop testing and report what you have.
-Severity: critical = the site or its main flow is unusable; high = a main feature fails or shows a server error; medium = a secondary feature fails; low = cosmetic.
-For each issue give the full URL of the page where it occurs and the exact steps to reproduce it. Put each step in its own array item, one short sentence per item, without numbering.`;
+Scope: stay on this site's own domain. Never enter real personal data, never pay, never create a real account.
+Run these six checks in this order, and report every one of them in "checks" using exactly these ids:
+1. homepage_loads: the page you are given loads and shows its main content.
+2. primary_navigation: click up to two links in the main navigation menu. Each one must load the page it names.
+3. form_empty_submit: find the most important form on the site (sign-up, login, contact or search) and submit it with every field empty. The site must refuse it with a visible message that says what is missing.
+4. form_invalid_data: submit the same form with obviously invalid test data, for example an email address without "@". The site must answer with a clear message. A validation message or an "invalid credentials" message is correct behaviour. A server error, a blank page or no reaction at all is a defect.
+5. main_cta: click the most prominent call-to-action button or link on the home page. It must do what its label says.
+6. no_visible_errors: on the pages you loaded there are no visible error messages, no broken images and no broken layout such as overlapping or cut-off content.
+Status of each check:
+- "pass": you ran the check and the site behaved correctly.
+- "fail": you ran the check and saw a defect happen.
+- "blocked": you could not run the check, because of bot detection or a CAPTCHA, a login wall, a timeout, running out of time, or because the thing to test does not exist (for example the site has no form). Blocked is not a defect.
+Never report "pass" or "fail" for a check you did not actually run. If you run short of time, mark the remaining checks "blocked" and say so in "observed".
+A banner saying the site is a demo or a test site does not excuse a defect: still report what breaks.
+For each check give: "page", the full URL where you ran it; "action", what you did, in at most 15 words; "observed", what you saw, in at most 30 words, quoting the visible text where there is any; "steps", for a failed check the exact steps to reproduce it, one short sentence per array item without numbering, and for a passed or blocked check an empty array.
+Keep the report short: writing it must take only a few seconds. Always return all six checks, even when you are out of time.
+In "pages_visited" list the full URL of every page you actually loaded in this run, and no others.
+In "summary" describe the result in two sentences.
+Report only what you actually observed in this run. Do not invent anything.`;
 
 const SEVERITIES = ["critical", "high", "medium", "low"];
 
@@ -124,26 +145,39 @@ const QA_OUTPUT_SCHEMA = {
   type: "object",
   properties: {
     summary: { type: "string" },
-    issues: {
+    checks: {
       type: "array",
-      maxItems: 20,
+      maxItems: CHECKS.length,
       items: {
         type: "object",
         properties: {
-          severity: { type: "string", enum: SEVERITIES },
-          title: { type: "string" },
-          steps: { type: "array", items: { type: "string" } },
+          id: { type: "string", enum: CHECKS.map((check) => check.id) },
+          name: { type: "string" },
+          status: { type: "string", enum: CHECK_STATUSES },
           page: { type: "string" },
+          action: { type: "string" },
+          observed: { type: "string" },
+          steps: { type: "array", items: { type: "string" } },
         },
-        required: ["severity", "title", "steps", "page"],
+        required: ["id", "name", "status", "page", "action", "observed", "steps"],
       },
     },
-    tested: { type: "array", maxItems: 30, items: { type: "string" } },
-    untested: { type: "array", maxItems: 3, items: { type: "string" } },
+    pages_visited: { type: "array", maxItems: 20, items: { type: "string" } },
   },
-  required: ["summary", "issues", "tested", "untested"],
-  propertyOrdering: ["summary", "issues", "tested", "untested"],
+  required: ["summary", "checks", "pages_visited"],
+  propertyOrdering: ["checks", "pages_visited", "summary"],
 };
+
+interface QaCheck {
+  id: string;
+  name: string;
+  status: string; // "pass" | "fail" | "blocked"
+  severity: string; // how much a failure of this check matters
+  page: string;
+  action: string;
+  observed: string;
+  steps: string[];
+}
 
 interface QaIssue {
   severity: string;
@@ -154,6 +188,9 @@ interface QaIssue {
 
 interface QaReport {
   summary: string;
+  checks: QaCheck[];
+  pages_visited: string[];
+  // Derived from the checks, in the shape the first version of the report had
   score: number;
   issues: QaIssue[];
   tested: string[];
@@ -161,38 +198,76 @@ interface QaReport {
   discovery?: Discovery;
 }
 
-// An "issue" that only says something was not tested is not a finding
-const NOT_TESTED = /\buntested\b|\bnot (been |fully |yet )?tested\b|\bcould ?n[o']t (be )?(test|verif|check)/i;
-
 function parseReport(result: unknown): QaReport | null {
   if (!result || typeof result !== "object") return null;
   const r = result as Record<string, unknown>;
   if (typeof r.summary !== "string" || !r.summary.trim()) return null;
-  if (!Array.isArray(r.issues)) return null;
-  if (!Array.isArray(r.tested) || !r.tested.every((t) => typeof t === "string")) return null;
-  if (!Array.isArray(r.untested) || !r.untested.every((u) => typeof u === "string")) return null;
+  if (!Array.isArray(r.checks) || !Array.isArray(r.pages_visited)) return null;
 
-  const tested = (r.tested as string[]).map((t) => t.trim()).filter(Boolean);
-  const untested = (r.untested as string[]).map((u) => u.trim()).filter(Boolean);
-  const issues: QaIssue[] = [];
-  for (const raw of r.issues) {
+  const reported = new Map<string, Record<string, unknown>>();
+  for (const raw of r.checks) {
     if (!raw || typeof raw !== "object") return null;
-    const i = raw as Record<string, unknown>;
-    if (typeof i.severity !== "string" || !SEVERITIES.includes(i.severity)) return null;
-    if (typeof i.title !== "string" || typeof i.page !== "string") return null;
-    if (!Array.isArray(i.steps) || !i.steps.every((s) => typeof s === "string")) return null;
+    const c = raw as Record<string, unknown>;
+    if (typeof c.id !== "string" || typeof c.status !== "string" || !CHECK_STATUSES.includes(c.status)) return null;
+    if (typeof c.page !== "string" || typeof c.action !== "string" || typeof c.observed !== "string") return null;
+    if (!Array.isArray(c.steps) || !c.steps.every((s) => typeof s === "string")) return null;
+    if (!reported.has(c.id)) reported.set(c.id, c);
+  }
+
+  // Always the full checklist, in its fixed order. A check the agent left out was not run.
+  const checks: QaCheck[] = CHECKS.map(({ id, name, severity }) => {
+    const c = reported.get(id);
+    if (!c) {
+      return {
+        id,
+        name,
+        severity,
+        status: "blocked",
+        page: "",
+        action: "",
+        observed: "The agent did not report this check.",
+        steps: [],
+      };
+    }
     // One step per item, even when the agent packs several lines into one string
-    const steps = (i.steps as string[])
+    const steps = (c.steps as string[])
       .flatMap((s) => s.split(/\r?\n/))
       .map((s) => s.replace(/^\s*(\d+[.)]|[-*•])\s+/, "").trim())
       .filter(Boolean);
-    if (NOT_TESTED.test(i.title)) {
-      untested.push(i.title);
-      continue;
-    }
-    issues.push({ severity: i.severity, title: i.title, steps, page: i.page });
+    return {
+      id,
+      name,
+      severity,
+      status: c.status as string,
+      page: (c.page as string).trim(),
+      action: (c.action as string).trim(),
+      observed: (c.observed as string).trim(),
+      steps: c.status === "fail" ? steps : [],
+    };
+  });
+
+  const pagesVisited: string[] = [];
+  for (const page of r.pages_visited) {
+    if (typeof page !== "string" || !/^https?:\/\//i.test(page.trim())) continue;
+    if (!pagesVisited.includes(page.trim())) pagesVisited.push(page.trim());
   }
-  return { summary: r.summary, score: scoreFromIssues(issues), issues, tested, untested };
+
+  const issues: QaIssue[] = checks.filter((check) => check.status === "fail").map((check) => ({
+    severity: check.severity,
+    title: `${check.name}: ${check.observed}`.slice(0, 200),
+    steps: check.steps.length > 0 ? check.steps : [check.action, check.observed].filter(Boolean),
+    page: check.page,
+  }));
+
+  return {
+    summary: r.summary,
+    checks,
+    pages_visited: pagesVisited,
+    score: scoreFromIssues(issues),
+    issues,
+    tested: checks.filter((check) => check.status !== "blocked").map((check) => check.name),
+    untested: checks.filter((check) => check.status === "blocked").map((check) => check.name),
+  };
 }
 
 // ─── Small helpers ────────────────────────────────────────────
@@ -1110,7 +1185,7 @@ async function resumeRun(
 
     if (row.report) {
       // The report is in; verify it now if an earlier connection ran out of time
-      const { verification: saved, ...report } = { tested: [], untested: [], ...row.report };
+      const { verification: saved, ...report } = { tested: [], untested: [], checks: [], pages_visited: [], ...row.report };
       if (row.verified === null) {
         await verifyAndComplete(ctx, report as QaReport, emit);
       } else {
@@ -1266,6 +1341,8 @@ serve(async (req: Request) => {
         url: target.url,
         goal: QA_GOAL,
         output_schema: QA_OUTPUT_SCHEMA,
+        // Fewer checks end up "blocked" by bot detection
+        browser_profile: "stealth",
         agent_config: { max_duration_seconds: TINYFISH_MAX_DURATION_SECONDS },
         api_integration: "microbounty",
       }),
