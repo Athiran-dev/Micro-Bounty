@@ -78,6 +78,7 @@ const VERIFY_LATEST_START_MS = 118_000;
 const SETTLE_LATEST_START_MS = 130_000;
 const VERIFY_STEP_TIMEOUT_MS = 12_000;
 const VERIFY_MAX_PAGES = 5;
+const MIN_TESTED_CHECKS = 3;
 const VERIFY_PAGE_CHARS = 3_000;
 
 const AI_STATUS_PENDING = 0;
@@ -91,7 +92,7 @@ Test in this order, and finish each step before starting the next:
 2. Links: follow the main navigation links or the most prominent call-to-action and check they load the pages they claim to.
 3. Broken things you come across on the way: error pages (404, 500), broken images, buttons that do nothing, visible error messages.
 What counts as an issue: a defect you saw happen. These are NOT issues and must not be reported: links that go to other domains, a form correctly showing a validation or "invalid credentials" message, and slow loading during your own test. A banner saying the site is a demo or a test site does not excuse a defect: still report what breaks.
-List every check you actually carried out in "tested", as short phrases such as "login form: empty submit". Anything you planned to test but did not, or could not finish, goes in "untested" as a short phrase. Never put an untested item in "issues". If you tested everything above, return an empty "untested" list.
+List every check you actually carried out in "tested", as short phrases such as "login form: empty submit". Anything you planned to test but did not, or could not finish, goes in "untested" as a short phrase: list at most 3 items, the most important ones. Never put an untested item in "issues". If you tested everything above, return an empty "untested" list.
 Report only what you actually observed in this run. Do not invent issues. If you run short of time, stop testing and report what you have.
 Severity: critical = the site or its main flow is unusable; high = a main feature fails or shows a server error; medium = a secondary feature fails; low = cosmetic.
 For each issue give the full URL of the page where it occurs and the exact steps to reproduce it. Put each step in its own array item, one short sentence per item, without numbering.`;
@@ -126,7 +127,7 @@ const QA_OUTPUT_SCHEMA = {
       },
     },
     tested: { type: "array", maxItems: 30, items: { type: "string" } },
-    untested: { type: "array", maxItems: 20, items: { type: "string" } },
+    untested: { type: "array", maxItems: 3, items: { type: "string" } },
   },
   required: ["summary", "issues", "tested", "untested"],
   propertyOrdering: ["summary", "issues", "tested", "untested"],
@@ -788,8 +789,9 @@ async function verifyAndComplete(ctx: RunContext, report: QaReport, emit: Emit):
   }
   emit({ type: "VERIFYING", run_id: ctx.runId, task_id: ctx.taskId, timestamp: new Date().toISOString() });
 
-  // Tested nothing, or left more untested than tested: the client did not get a test, so refund
-  if (report.tested.length === 0 || report.untested.length > report.tested.length) {
+  // Tested nothing, or barely anything with nothing found: the client did not get a test, so refund.
+  // Every other report goes to the Judge.
+  if (report.tested.length === 0 || (report.tested.length < MIN_TESTED_CHECKS && report.issues.length === 0)) {
     await settleAndComplete(ctx, report, false, { pages: [], incomplete: true }, emit);
     return;
   }

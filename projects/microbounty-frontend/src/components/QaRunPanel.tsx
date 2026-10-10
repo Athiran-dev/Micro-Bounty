@@ -48,6 +48,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
   const [phase, setPhase] = useState<Phase>('idle');
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [streamingUrl, setStreamingUrl] = useState<string | null>(null);
+  const [liveEnded, setLiveEnded] = useState(false);
   const [taskId, setTaskId] = useState<number | null>(null);
   const [report, setReport] = useState<QaReport | null>(null);
   const [finalEvent, setFinalEvent] = useState<QaEvent | null>(null);
@@ -60,6 +61,12 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
   const addEntry = (label: string, tone: TimelineEntry['tone'] = 'step') => {
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     setTimeline((entries) => [...entries, { id: nextId.current++, label, time, tone }]);
+  };
+
+  // The browser session closes when the agent stops testing
+  const endLiveView = () => {
+    if (seen.current.live) setLiveEnded(true);
+    setStreamingUrl(null);
   };
 
   const changePhase = (next: Phase) => {
@@ -88,7 +95,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
         break;
       case 'REPORT':
         if (event.result) setReport(event.result);
-        setStreamingUrl(null);
+        endLiveView();
         addEntry('Report received', 'milestone');
         break;
       case 'VERIFYING':
@@ -99,7 +106,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
         break;
       case 'COMPLETE':
         if (event.result) setReport(event.result);
-        setStreamingUrl(null);
+        endLiveView();
         setFinalEvent(event);
         addEntry('Run complete', 'milestone');
         break;
@@ -122,6 +129,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
 
     setTimeline([]);
     setStreamingUrl(null);
+    setLiveEnded(false);
     setReport(null);
     setFinalEvent(null);
     setError(null);
@@ -166,7 +174,7 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
       console.error('[qa-agent] run failed:', e);
       setError(e?.message || String(e));
     } finally {
-      setStreamingUrl(null);
+      endLiveView();
       changePhase(lockFailed ? 'idle' : 'done');
     }
   };
@@ -273,6 +281,16 @@ export default function QaRunPanel({ agent, onRunningChange, onClose }: QaRunPan
         </div>
       )}
 
+      {liveEnded && !streamingUrl && (
+        <div className="bg-[#1A1D24] border border-[#262A36] rounded-xl px-4 py-3 flex items-center gap-3">
+          <Monitor className="w-4 h-4 text-[#64748B] shrink-0" />
+          <div>
+            <h4 className="text-sm font-bold text-white">Live browser view</h4>
+            <p className="text-xs text-[#64748B]">Session ended. The agent has closed its browser.</p>
+          </div>
+        </div>
+      )}
+
       {timeline.length > 0 && (
         <div className="bg-[#1A1D24] border border-[#262A36] rounded-xl p-4">
           <h4 className="text-sm font-bold text-white mb-4 uppercase tracking-wider flex items-center gap-2">
@@ -351,6 +369,7 @@ function QaReportCard({ report, finalEvent }: { report: QaReport; finalEvent: Qa
   const settlement = verification?.settlement;
   const tested = report.tested ?? [];
   const untested = report.untested ?? [];
+  const incomplete = finalEvent?.incomplete === true;
 
   const grouped = SEVERITY_ORDER
     .map((severity) => ({ severity, issues: report.issues.filter((issue) => issue.severity === severity) }))
@@ -392,10 +411,16 @@ function QaReportCard({ report, finalEvent }: { report: QaReport; finalEvent: Qa
 
       <div className="bg-[#1A1D24] border border-[#262A36] rounded-xl p-6 space-y-6">
         <div className="flex flex-col md:flex-row items-center gap-6 bg-[#15171E] p-6 rounded-2xl border border-[#262A36]">
-          <div className="w-24 h-24 rounded-2xl border flex flex-col items-center justify-center shrink-0 border-[#C4A1FF]/50 bg-[#C4A1FF]/10 text-[#C4A1FF]">
-            <span className="text-4xl font-black">{report.score}</span>
-            <span className="text-[10px] font-bold uppercase tracking-widest mt-1">Score</span>
-          </div>
+          {!incomplete && (
+            <div className="w-24 h-24 rounded-2xl border flex flex-col items-center justify-center shrink-0 border-[#C4A1FF]/50 bg-[#C4A1FF]/10 text-[#C4A1FF]">
+              {finalEvent ? (
+                <span className="text-4xl font-black">{report.score}</span>
+              ) : (
+                <Loader2 className="w-8 h-8 animate-spin" />
+              )}
+              <span className="text-[10px] font-bold uppercase tracking-widest mt-1">Score</span>
+            </div>
+          )}
           <p className="flex-1 text-[#94A3B8] text-sm leading-relaxed text-center md:text-left">{report.summary}</p>
         </div>
 
@@ -437,7 +462,7 @@ function VerdictBanner({ finalEvent }: { finalEvent: QaEvent }) {
     label = 'Incomplete';
     style = 'bg-yellow-500/10 border-yellow-500/30';
     titleStyle = 'text-yellow-300';
-    reasoning = 'The agent tested nothing, or left more untested than it tested, so the run does not count.';
+    reasoning = 'The agent did not test enough of the site for this run to count, so no score is given.';
   } else if (verified === true) {
     label = 'Verified';
     style = 'bg-[#00FF9D]/10 border-[#00FF9D]/30';

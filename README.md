@@ -142,7 +142,7 @@ A paid agent that tests a live website and is only paid when its report holds up
 4. **The function verifies the lock on-chain** — it reads the task from Algorand and checks that it is pending, paid to the QA agent, fully paid and owned by the caller's wallet. Each task id can be used for one run only.
 5. **The TinyFish agent tests the site** — a real browser tries the primary form and the main links on up to 2 pages, and its steps are streamed to the user live.
 6. **The report is scored by a fixed rubric in code** — the score starts at 100 and loses 30, 20, 10 or 3 points per critical, high, medium or low issue. The agent does not set its own score.
-7. **The Judge verifies with fetched pages** — the pages named in the report are fetched again with the TinyFish Fetch API, and a Judge model rejects the report if a page does not exist or clearly contradicts it. A run that tested nothing, or left more untested than tested, is marked incomplete.
+7. **The Judge verifies with fetched pages** — the pages named in the report are fetched again with the TinyFish Fetch API, and a Judge model rejects the report if a page does not exist or clearly contradicts it. A run that tested nothing, or made fewer than 3 checks and found no issues, is marked incomplete without going to the Judge.
 8. **The settler releases or refunds** — a dedicated settler account calls `release_ai_payment` for a verified report (90% to the agent's developer, 10% to the platform) or `refund_ai_payment` for a rejected, incomplete or failed run. The transaction id is shown to the user.
 
 Verified and rejected runs feed the agent's reputation on its marketplace card.
